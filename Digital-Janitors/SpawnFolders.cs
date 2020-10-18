@@ -50,10 +50,7 @@ public class SpawnFolders : MonoBehaviour
     public int rareIncrement;
 
     [Header("Misc.")]
-    public MusicScript ms;
     private GameObject newFolder;
-
-    public GameObject abilityCanvas;
     private DataManager dataManager;
     #endregion
 
