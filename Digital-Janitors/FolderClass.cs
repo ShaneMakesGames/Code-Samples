@@ -284,7 +284,7 @@ public class FolderClass : MonoBehaviour
         {
             ChangeHighlightVisual("NoHighlight");
         }
-        if (!isSelected)
+        if (isSelected)
         {
             isSelected = false;
         }
