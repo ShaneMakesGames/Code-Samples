@@ -168,6 +168,10 @@ public class SpawnFolders : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Clears any folders that are still in play
+    /// </summary>
+    /// <returns></returns>
     public IEnumerator CheckAndClearFoldersCoroutine()
     {
         if (FolderManager.instance.allFolders.Count > 0)
@@ -182,6 +186,10 @@ public class SpawnFolders : MonoBehaviour
 
     }
 
+    /// <summary>
+    /// Ends the current level and returns player to the Overworld
+    /// </summary>
+    /// <returns></returns>
     IEnumerator OverworldTransitionCoroutine()
     {
         MessengerOBJ.SetActive(false);
@@ -192,6 +200,9 @@ public class SpawnFolders : MonoBehaviour
         SceneManager.LoadScene("Overworld");
     }
 
+    /// <summary>
+    /// Decides whether a rare or normal folder will be spawned
+    /// </summary>
     public void CallSpawn()
     {
         if (LevelSO.waveDataList[waveCount].rareFolders.Length > 0)
