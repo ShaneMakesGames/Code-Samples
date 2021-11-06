@@ -11,52 +11,68 @@ public class RunawayFolder : FolderClass
     public bool runaway;
 
     [Header("Move Components")]
-    public float speed;
+    public int movingFolderIndex = 0;
+
+    public AudioSource RunawaySFX;
+
     public float countdown;
     public float countTime = 2f;
     public float x;
     public float y;
     private Vector2 mv;
     public Vector2 randomPos;
-    private int random;
-    public Camera cam;
     #endregion
 
-    void Start()
+    protected override void Awake()
     {
+        base.Awake();
+        moveCountCoroutine = MoveCountdownCoroutine;
+
+        RunawaySFX = GetComponent<AudioSource>();
+
+        movingFolderStruct = DataManager.Instance.MovingFolderStructList[movingFolderIndex];
+
         rb = GetComponent<Rigidbody2D>();
         countdown = countTime;
-        cam = ReferenceManager.instance.spawnCam;
-        RandomVector();
-        StartCoroutine(MoveCountdownCoroutine());
     }
 
-    public void OnMouseOver()
+    public override void InitializeFolderBehavior()
     {
-        if (!PopUp.popUpActive && !gameCursor.holdingFolder && !PauseMenu.isPaused)
+        base.InitializeFolderBehavior();
+
+        mv = GetRandomSpawnPosition().normalized * movingFolderStruct.currentSpeed * 4;
+
+        StartCoroutine(moveCountCoroutine());
+    }
+
+    public override void OnMouseOver()
+    {
+        if (interactable)
         {
-            isMouseOver = true;
-            MouseOver = true;
-            gameCursor.UpdateSprite(GameCursor.CursorState.Selected);
-            if (Input.GetMouseButtonDown(0) && !isSelected)
+            if (!PopUp.popUpActive && !gameCursor.holdingFolder && !PauseMenu.isPaused)
             {
-                // Can pass through the invisible walls while being dragged
-                gameObject.layer = 12;
+                isMouseOver = true;
+                MouseOver = true;
+                gameCursor.UpdateSprite(GameCursor.CursorState.Selected);
+                if (Input.GetMouseButtonDown(0) && !isSelected)
+                {
+                    // Can pass through the invisible walls while being dragged
+                    gameObject.layer = 12;
 
-                isSelected = true;
-                gameCursor.holdingFolder = true;
-                gameCursor.selectedFolder = folderClass;
+                    isSelected = true;
+                    gameCursor.holdingFolder = true;
+                    gameCursor.selectedFolder = folderClass;
 
-                // Resets countdown time
-                countdown = countTime;
+                    // Resets countdown time
+                    countdown = countTime;
 
-                StopCoroutine(MoveCountdownCoroutine());
-                StartCoroutine(FolderSelectedCoroutine());
-                StartCoroutine(CheckForDropCoroutine());
-            }
-            else if (!runaway && !affectedByAbility)
-            {
-                StartCoroutine(TriggerRunawayCoroutine());
+                    StopCoroutine(moveCountCoroutine());
+                    StartCoroutine(folderSelectCoroutine());
+                }
+                else if (!runaway && !affectedByAbility)
+                {
+                    StartCoroutine(TriggerRunawayCoroutine());
+                }
             }
         }
     }
@@ -67,13 +83,18 @@ public class RunawayFolder : FolderClass
     /// <returns></returns>
     IEnumerator TriggerRunawayCoroutine()
     {
+        RunawaySFX.Play();
+
         runaway = true;
-        Runaway();
+        movingFolderStruct.currentSpeed *= 4;
+        mv = GetRandomSpawnPosition().normalized * movingFolderStruct.currentSpeed ;
         yield return new WaitForSeconds(.25f);
         runaway = false;
+        movingFolderStruct.currentSpeed /= 4;
 
     }
 
+    private CoroutineDelegate moveCountCoroutine;
     /// <summary>
     /// Countdown to Random Movement
     /// </summary>
@@ -85,24 +106,20 @@ public class RunawayFolder : FolderClass
             countdown -= Time.deltaTime;
             if (countdown <= 0)
             {
-                RandomVector();
+                mv = GetRandomSpawnPosition().normalized * movingFolderStruct.currentSpeed;
                 countdown = countTime;
             }
             yield return new WaitForEndOfFrame();
         }
     }
 
-    IEnumerator CheckForDropCoroutine()
+    protected override void DropFolder()
     {
-        while (isSelected)
-        {
-            yield return new WaitForEndOfFrame();
-        }
+        base.DropFolder();
         // When dropped, moving folder can be stopped by the invisible walls
-        gameObject.layer = 10;
-        StartCoroutine(MoveCountdownCoroutine());
+        gameObject.layer = 9;
+        StartCoroutine(moveCountCoroutine());
     }
-
 
 
     void FixedUpdate()
@@ -113,72 +130,64 @@ public class RunawayFolder : FolderClass
         }
     }
 
-
-    void Runaway()
+    public override void ResetInteractable()
     {
-        random = Random.Range(1, 5);
-        if (random == 1)
+        base.ResetInteractable();
+        StartCoroutine(moveCountCoroutine());
+    }
+
+    #region Wall Bounce
+
+    // Ensures the folder doesn't get stuck moving against a wall
+    private bool canBounce = true;
+    private BounceAid bounceAid;
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        if (collision.gameObject.CompareTag("InvisibleWall") && canBounce)
         {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            randomPos = new Vector2(x, y);
-            // Moves faster than normal while in Runaway state
-            mv = randomPos.normalized * speed * 5;
-        }
-        if (random == 2)
-        {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            randomPos = new Vector2(x, y);
-            mv = randomPos.normalized * speed * 5;
-        }
-        if (random == 3)
-        {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            randomPos = new Vector2(x, y);
-            mv = randomPos.normalized * speed * 5;
-        }
-        if (random == 4)
-        {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            randomPos = new Vector2(x, y);
-            mv = randomPos.normalized * speed * 5;
+            bounceAid = collision.gameObject.GetComponent<BounceAid>();
+            StartCoroutine(DelayBounceCoroutine());
         }
     }
 
-
-    void RandomVector()
+    private IEnumerator DelayBounceCoroutine()
     {
-        random = Random.Range(1, 5);
-        if (random == 1)
+        canBounce = false;
+        MoveAwayFromWall(bounceAid.Direction);
+        yield return new WaitForSeconds(.25f);
+        canBounce = true;
+        bounceAid = null;
+    }
+
+    private void MoveAwayFromWall(string _direction)
+    {
+        Vector2 direction;
+        switch (_direction)
         {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            randomPos = new Vector2(x, y);
-            mv = randomPos.normalized * speed;
-        }
-        if (random == 2)
-        {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            randomPos = new Vector2(x, y);
-            mv = randomPos.normalized * speed;
-        }
-        if (random == 3)
-        {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            randomPos = new Vector2(x, y);
-            mv = randomPos.normalized * speed;
-        }
-        if (random == 4)
-        {
-            y = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            x = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            randomPos = new Vector2(x, y);
-            mv = randomPos.normalized * speed;
+            case "Right":
+                direction = new Vector2(-1, 0);
+                mv = direction * movingFolderStruct.currentSpeed;
+                break;
+            case "Left":
+                direction = new Vector2(1, 0);
+                mv = direction * movingFolderStruct.currentSpeed;
+                break;
+            case "Up":
+                direction = new Vector2(0, -1);
+                mv = direction * movingFolderStruct.currentSpeed;
+                break;
+            case "Down":
+                direction = new Vector2(0, 1);
+                mv = direction * movingFolderStruct.currentSpeed;
+                break;
         }
     }
+    #endregion
+
+    protected override void OnDestroy()
+    {
+        base.OnDestroy();
+        moveCountCoroutine = null;
+    }
+
 }
