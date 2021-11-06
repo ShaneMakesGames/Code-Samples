@@ -3,25 +3,21 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-public class SpawnFolders : MonoBehaviour
+public class SpawnFolders : SpawningClass
 {
     #region Variables
     public LevelData LevelSO;
+    public SpawnData SpawnSO;
 
     [Header("Files Being Used")]
     public List<GameObject> prefabList = new List<GameObject>();
     private int prefabIndex;
-    public GameObject FoldersOBJ;
     public GameObject MessengerOBJ;
 
     [Header("Pop Ups")]
     public bool spawnPopUps;
     public GameObject prefabPopUp;
     public int prefabPopUpIndex;
-
-    [Header("Cameras")]
-    public Camera cam;
-    public Camera popCam;
 
     [Header("Wave Stats")]
     public bool waveActive = true;
@@ -34,44 +30,58 @@ public class SpawnFolders : MonoBehaviour
     public float countTime = 1.5f;
     public float changeWaveCount;
     public float changeWaveTime = 1f;
-    private int random;
 
     public float PopTimer = 14f;
     public float PopCountdown;
 
     [Header("Animators and Audio")]
     public Animator bg;
+    public AudioSource music;
     public AudioSource sound;
     public AudioSource popSound;
 
     [Header("Rare Chance")]
     public int defaultRareChance;
-    public int curentRareChance;
+    public int currentRareChance;
     public int rareIncrement;
 
     [Header("Misc.")]
+    public MusicScript ms;
     private GameObject newFolder;
     private DataManager dataManager;
     #endregion
 
     void Start()
     {
-        StartCoroutine(FadeIn.instance.FadeTransition());
-        Money.instance.CurrencyChanged();
+        StartCoroutine(FadeIn.Instance.FadeTransition());
+        Money.Instance.CurrencyChanged();
 
-        cam = ReferenceManager.instance.spawnCam.GetComponent<Camera>();
-        popCam = ReferenceManager.instance.popUpCam.GetComponent<Camera>();
         sound = GetComponent<AudioSource>();
         dataManager = DataManager.Instance;
 
-        // Gets current LevelSO from DataManager
-        LevelSO = dataManager.CurrentLevelSO;
+        LevelSO = dataManager.CurrentLevelSO; // Gets current LevelSO from DataManager
+        
+        if (dataManager.DifficultyID == "Normal") // Gets spawn rates based on current difficulty mode
+        {
+            SpawnSO = LevelSO.normalSpawnData;
+        }
+        else
+        {
+            SpawnSO = LevelSO.hardSpawnData;
+        }
 
-        // Countdown for Spawning malware and Pop Ups and countdown for next wave
+        music.clip = LevelSO.levelMusic;
+        music.Play();
+
+
+        // Countdowns for Spawning malware and Pop Ups and countdown for next wave
+        countTime = SpawnSO.folderSpawnTime;
+        changeWaveTime = SpawnSO.waveLength;
         countdown = countTime;
+        PopTimer = SpawnSO.popUpSpawnTime;
         PopCountdown = PopTimer;
         changeWaveCount = changeWaveTime;
-        curentRareChance = defaultRareChance;
+        currentRareChance = defaultRareChance;
 
         foreach (GameObject OBJ in LevelSO.waveDataList[0].folders)
         {
@@ -81,14 +91,66 @@ public class SpawnFolders : MonoBehaviour
         prefabPopUpIndex = 0;
 
         waveCount = 0;
-        // Plays Wave Start Animation
+        
         sound.Play();
-        bg.SetTrigger("NextWave");
+        bg.SetTrigger("NextWave"); // Plays Wave Start Animation
+
+        if (SceneManager.GetActiveScene().name != "NewAdventureBoss")
+        {
+            ReferenceManager.Instance.recycle.IncorrectSortFunction += IncorrectSort;
+            ReferenceManager.Instance.secureDrive.IncorrectSortFunction += IncorrectSort;
+        }
+
+        StartCoroutine(WaveCoroutine());
+
+        if (!AchievementManager.Instance.IsAchievementUnlocked("Overdrive"))
+        {
+            StartCoroutine(OverdriveCheckCoroutine());
+        }
     }
 
-    void Update()
+    private bool overdriveSuccess = true;
+    private IEnumerator OverdriveCheckCoroutine()
     {
-        if (waveActive)
+        float timePassed = 0;
+        while (overdriveSuccess)
+        {
+            if (waveActive)
+            {
+                if (timePassed >= 90)
+                {
+                    overdriveSuccess = false; // Achievement Failed
+                }
+                timePassed += Time.deltaTime;
+            }
+            yield return null;
+        }
+    }
+
+    private int numIncorrectSorts;
+    private int numTilSpawn = 3;
+    private int numIncorrectSpawns;
+    private void IncorrectSort()
+    {
+        numIncorrectSorts++;
+
+        if (numIncorrectSorts >= numTilSpawn)
+        {
+            Spawn();
+            numIncorrectSorts = 0;
+            numIncorrectSpawns++;
+
+            if (numIncorrectSpawns > 3 && numTilSpawn > 1)
+            {
+                numTilSpawn--;
+                numIncorrectSpawns = 0;
+            }
+        }
+    }
+
+    private IEnumerator WaveCoroutine()
+    {
+        while (waveActive)
         {
             // Spawns Folders
             countdown -= Time.deltaTime;
@@ -111,29 +173,38 @@ public class SpawnFolders : MonoBehaviour
             changeWaveCount -= Time.deltaTime;
             if (changeWaveCount <= 0)
             {
-                waveCanEnd = true;
-                countTime += .5f;
+                countTime += SpawnSO.folderSpawnSlowdown;
                 PopTimer += 1f;
                 numSlows++;
+                waveCanEnd = true;
                 changeWaveCount = changeWaveTime;
             }
-
             // Ends the current wave so no more files will be spawned
-            if (waveCanEnd && FolderManager.instance.allFolders.Count == 0)
+            if (waveCanEnd && FolderManager.Instance.allFolders.Count == 0)
             {
                 waveActive = false;
                 StartCoroutine(CheckAndClearFoldersCoroutine());
             }
+            yield return null;
         }
     }
 
+    public void DevNextWave()
+    {
+        waveActive = false;
+        StartCoroutine(CheckAndClearFoldersCoroutine());
+    }
+
+    /// <summary>
+    /// If there are more waves in the level, otherwise return to Overworld
+    /// </summary>
     public void NextWave()
     {
         ResetRareChance();
         // Resets the slows
         for (int i = 0; i != numSlows; i++)
         {
-            countTime -= .5f;
+            countTime -= SpawnSO.folderSpawnSlowdown;
             PopTimer -= 1f;
         }
         numSlows = 0;
@@ -148,18 +219,16 @@ public class SpawnFolders : MonoBehaviour
             bg.SetTrigger("NextWave");
             // Wave lasts longer and Folders spawn quicker
             changeWaveTime += 2f;
-            countTime -= .1f;
+            countTime -= .05f;
             prefabList.Clear();
             foreach (GameObject OBJ in LevelSO.waveDataList[waveCount].folders)
             {
                 prefabList.Add(OBJ);
             }
-            if (waveCount == 3)
-            {
-                countTime = 1f;
-            }
             changeWaveCount = changeWaveTime;
             countdown = countTime;
+
+            StartCoroutine(WaveCoroutine());
         }
         else
         {
@@ -174,16 +243,22 @@ public class SpawnFolders : MonoBehaviour
     /// <returns></returns>
     public IEnumerator CheckAndClearFoldersCoroutine()
     {
-        if (FolderManager.instance.allFolders.Count > 0)
+        if (FolderManager.Instance.allFolders.Count > 0)
         {
-            foreach (GameObject folder in FolderManager.instance.allFolders)
+            foreach (FolderClass folderClass in FolderManager.Instance.allFolders)
             {
-                Destroy(folder);
+                Destroy(folderClass.gameObject);
             }
             yield return new WaitForEndOfFrame();
-            DangerBar.instance.FolderCountChanged();
+            DangerBar.Instance.FolderCountChanged();
         }
-
+        if (FolderManager.Instance.NonFolderObjects.Count > 0)
+        {
+            foreach (GameObject _gameObject in FolderManager.Instance.NonFolderObjects)
+            {
+                Destroy(_gameObject);
+            }
+        }
     }
 
     /// <summary>
@@ -192,12 +267,27 @@ public class SpawnFolders : MonoBehaviour
     /// <returns></returns>
     IEnumerator OverworldTransitionCoroutine()
     {
+        Time.timeScale = 1;
         MessengerOBJ.SetActive(false);
         dataManager.levelNum++;
-        StartCoroutine(FadeIn.instance.Fade());
+
+        if (!AchievementManager.Instance.IsAchievementUnlocked("First_Time"))
+        {
+            AchievementManager.Instance.UnlockAchievementByID("First_Time");
+        }
+
+        if (!AchievementManager.Instance.IsAchievementUnlocked("Overdrive"))
+        {
+            if (overdriveSuccess)
+            {
+                AchievementManager.Instance.UnlockAchievementByID("Overdrive");
+            }
+        }
+
+        AchievementManager.Instance.SaveAchievementData();
         dataManager.SaveData();
-        yield return new WaitForSeconds(3);
-        SceneManager.LoadScene("Overworld");
+        yield return new WaitForSeconds(1);
+        SceneSwitchManager.Instance.TriggerSceneChange("Overworld");
     }
 
     /// <summary>
@@ -208,7 +298,7 @@ public class SpawnFolders : MonoBehaviour
         if (LevelSO.waveDataList[waveCount].rareFolders.Length > 0)
         {
             int random = Random.Range(1, 11);
-            if (random > curentRareChance)
+            if (random > currentRareChance)
             {
                 Spawn();
                 IncrementRareChance();
@@ -226,14 +316,14 @@ public class SpawnFolders : MonoBehaviour
     }
 
     /// <summary>
-    /// Increase the chance of a rare folder spawning
+    /// Increases the chance of a rare folder spawning
     /// </summary>
     public void IncrementRareChance()
     {
         rareIncrement++;
         if (rareIncrement > 2)
         {
-            curentRareChance++;
+            currentRareChance++;
             rareIncrement = 1;
         }
     }
@@ -243,163 +333,54 @@ public class SpawnFolders : MonoBehaviour
     /// </summary>
     public void ResetRareChance()
     {
-        curentRareChance = defaultRareChance;
+        currentRareChance = defaultRareChance;
         rareIncrement = 1;
     }
 
-    public void Spawn()
+    public void Spawn() // Spawns a folder and adds it to the Folder Manager
     {
         prefabIndex = Random.Range(0, prefabList.Count);
-        random = Random.Range(1, 5);
         Vector3 spawnPosition = GetRandomSpawnPosition();
-        newFolder = Instantiate(prefabList[prefabIndex], spawnPosition, Quaternion.identity);
+        newFolder = Instantiate(prefabList[prefabIndex], spawnPosition, Quaternion.identity, FolderHolder.transform);
         
         AddFolderToManager(newFolder);
-        CheckForAbilities(newFolder);
 
         newFolder = null;
-        DangerBar.instance.FolderCountChanged();
+        DangerBar.Instance.FolderCountChanged();
     }
 
-    public void RareSpawn()
+    public void RareSpawn() // Spawns a rare folder and adds it to the Folder Manager
     {
         int spawnNum = Random.Range(0, LevelSO.waveDataList[waveCount].rareFolders.Length);
         Vector3 spawnPosition = GetRandomSpawnPosition();
-        newFolder = Instantiate(LevelSO.waveDataList[waveCount].rareFolders[spawnNum], spawnPosition, Quaternion.identity);
+        newFolder = Instantiate(LevelSO.waveDataList[waveCount].rareFolders[spawnNum], spawnPosition, Quaternion.identity, FolderHolder.transform);
 
         AddFolderToManager(newFolder);
-        CheckForAbilities(newFolder);
 
         newFolder = null;
-        DangerBar.instance.FolderCountChanged();
+        DangerBar.Instance.FolderCountChanged();
     }
 
-    /// <summary>
-    /// Returns a random spawn location for a folder
-    /// </summary>
-    /// <returns></returns>
-    private Vector3 GetRandomSpawnPosition()
-    {
-        random = Random.Range(1, 5);
-        if (random == 1)
-        {
-            float spawnY = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            float spawnX = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            Vector3 spawnPosition = new Vector3(spawnX, spawnY, 0);
-            return spawnPosition;
-        }
-        else if (random == 2)
-        {
-            float spawnY = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            float spawnX = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            Vector3 spawnPosition = new Vector3(spawnX, spawnY, 0);
-            return spawnPosition;
-        }
-        else if (random == 3)
-        {
-            float spawnY = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            float spawnX = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            Vector3 spawnPosition = new Vector3(spawnX, spawnY, 0);
-            return spawnPosition;
-        }
-        else
-        {
-            float spawnY = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            float spawnX = Random.Range(0, cam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            Vector3 spawnPosition = new Vector3(spawnX, spawnY, 0);
-            return spawnPosition;
-        }
-    }
-
-    /// <summary>
-    /// Adds folder to a list of all folders and another list depending on it's tag
-    /// </summary>
-    /// <param name="obj"></param>
-    private void AddFolderToManager(GameObject obj)
-    {
-        // Adds the spawned folder to an array in FolderManager
-        obj.transform.parent = FoldersOBJ.transform;
-        FolderManager.instance.allFolders.Add(obj);
-        if (obj.CompareTag("Malware"))
-        {
-            FolderManager.instance.malwareFolders.Add(obj);
-        }
-        else if (obj.CompareTag("Personal"))
-        {
-            FolderManager.instance.personalFolders.Add(obj);
-        }
-    }
-
-    /// <summary>
-    /// If an ability is active, give the folder appropriate helper script
-    /// </summary>
-    /// <param name="obj"></param>
-    private void CheckForAbilities(GameObject obj)
-    {
-        if (AbilityManager.Instance.AbilityStatus.ContainsKey("Marquee Ability"))
-        {
-            newFolder.AddComponent<MarqueeAid>();
-        }
-        if (AbilityManager.Instance.AbilityStatus.ContainsKey("Magnet Ability"))
-        {
-            newFolder.AddComponent<MagnetAid>();
-        }
-        if (AbilityManager.Instance.AbilityStatus.ContainsKey("Binary Sort Ability"))
-        {
-            newFolder.AddComponent<BinarySortAid>();
-        }
-        if (AbilityManager.Instance.AbilityStatus.ContainsKey("Proximity Sort Ability"))
-        {
-            newFolder.AddComponent<ProximitySortAid>();
-
-        }
-        if (AbilityManager.Instance.AbilityStatus.ContainsKey("Filer Eraser Ability"))
-        {
-            newFolder.AddComponent<FileEraserAid>();
-        }
-    }
-
-    public void SpawnPop()
+    public void SpawnPop() // Spawns a Pop Up
     {
         popSound.Play();
         if (prefabPopUpIndex > 4)
         {
             prefabPopUpIndex = 0;
         }
-        random = Random.Range(1, 5);
-
-        if (random == 1)
-        {
-            float spawnY = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            float spawnX = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            Vector2 spawnPosition = new Vector2(spawnX, spawnY);
-            GameObject pop = Instantiate(prefabPopUp, spawnPosition, Quaternion.identity);
-            pop.GetComponent<PopUp>().AssignAnimation(prefabPopUpIndex, false);
-        }
-        if (random == 2)
-        {
-            float spawnY = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            float spawnX = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(Screen.width, 0)).x);
-            Vector2 spawnPosition = new Vector2(spawnX, spawnY);
-            GameObject pop = Instantiate(prefabPopUp, spawnPosition, Quaternion.identity);
-            pop.GetComponent<PopUp>().AssignAnimation(prefabPopUpIndex, false);
-        }
-        if (random == 3)
-        {
-            float spawnY = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(Screen.height, 0)).y);
-            float spawnX = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            Vector2 spawnPosition = new Vector2(spawnX, spawnY);
-            GameObject pop = Instantiate(prefabPopUp, spawnPosition, Quaternion.identity);
-            pop.GetComponent<PopUp>().AssignAnimation(prefabPopUpIndex, false);
-        }
-        if (random == 4)
-        {
-            float spawnY = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(0, Screen.height)).y);
-            float spawnX = UnityEngine.Random.Range(0, popCam.ScreenToWorldPoint(new Vector2(0, Screen.width)).x);
-            Vector2 spawnPosition = new Vector2(spawnX, spawnY);
-            GameObject pop = Instantiate(prefabPopUp, spawnPosition, Quaternion.identity);
-            pop.GetComponent<PopUp>().AssignAnimation(prefabPopUpIndex, false);
-        }
+        Vector2 spawnPosition = GetRandomPopUpSpawnPosition();
+        GameObject pop = Instantiate(prefabPopUp, spawnPosition, Quaternion.identity);
+        pop.GetComponent<PopUp>().AssignAnimation(prefabPopUpIndex, false);
+        FolderManager.Instance.NonFolderObjects.Add(pop);
         prefabPopUpIndex++;
+    }
+
+    private void OnDestroy()
+    {
+        if (SceneManager.GetActiveScene().name != "NewAdventureBoss")
+        {
+            ReferenceManager.Instance.recycle.IncorrectSortFunction -= IncorrectSort;
+            ReferenceManager.Instance.secureDrive.IncorrectSortFunction -= IncorrectSort;
+        }
     }
 }
