@@ -2,35 +2,21 @@
 using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
+
 public class FolderClass : MonoBehaviour
 {
     #region Variables
     [Header("Bools")]
+    public bool interactable; // Whether the folder can be interacted with
     public bool isSelected; // Whether the folder is being dragged
     public bool abilityProof;   // Whether a folder can be affected by an ability
     public bool abilityDrag;    // Whether a folder is being moved by an ability
     public bool affectedByAbility;  // Whether a folder's behavior is being stopped by an ability
 
-    protected GameCursor gameCursor;
     protected FolderClass folderClass;
 
-    public enum FolderTypes
-    {
-        defaultFolder,
-        encryptedFolder
-    }
-    public enum AnimatedFolder
-    {
-        folderAnim,
-        noFolderAnim
-    }
+    protected GameCursor gameCursor; // Reference to the gameCursor, used for updating cursor hover states 
     
-    [Header("Folder Specs")]
-    public FolderTypes folderType;
-    public AnimatedFolder animatedFolder;
-
-    public EncryptedFolder encryptFolderRef;
-
     public static bool isMouseOver = false;
 
     [Header("Order in Layer")]
@@ -56,73 +42,67 @@ public class FolderClass : MonoBehaviour
         {
             if (value)
             {
-                if (folderType != FolderTypes.encryptedFolder || encryptFolderRef != null && !encryptFolderRef.isEncrypted)
+                foreach (SpriteRenderer spr in RendererList)
                 {
-                    foreach (SpriteRenderer spr in RendererList)
-                    {
-                        spr.sortingOrder++;
-                    }
-                    fileName.sortingOrder++;
+                    spr.sortingOrder++;
                 }
+                fileName.sortingOrder++;
                 OffsetFunction();
             }
             else
             {
-                if (folderType != FolderTypes.encryptedFolder || encryptFolderRef != null && !encryptFolderRef.isEncrypted)
+                foreach (SpriteRenderer spr in RendererList)
                 {
-                    foreach (SpriteRenderer spr in RendererList)
-                    {
-                        spr.sortingOrder--;
-                    }
-                    fileName.sortingOrder--;
+                    spr.sortingOrder--;
                 }
+                fileName.sortingOrder--;
             }
         }
     }
+
+    [Header("Spawn SFX")]
+    public AudioSource folderAudio;
+    public FolderSpawnSFXData SFXData;
 
     [Header("TMPRO")]
     public TextMeshPro fileName;
     public string[] fileNameList;
 
     [Header("Animation")]
+    public bool animatedFolder;
     public Animator folderAnim;
     public Animator highlightAnim;
+
+    [Header("Rare Folder")]
+    public bool rareFolder;
+
+    [Header("Moving Folder")]
+    public bool movingFolder;
+    public MovingFolderStruct movingFolderStruct;
     #endregion
 
-    #region Folder Animation
+    #region Folder Type & Animation
 
-    private void Awake()
+    protected virtual void Awake()
     {
-        folderClass = this;
-        gameCursor = ReferenceManager.instance.GetGameCursor();
+        StartCoroutine(FolderSpawnAnimationCoroutine());
 
-        switch (folderType)
+        folderClass = this;
+        gameCursor = ReferenceManager.Instance.GetGameCursor();
+
+
+        folderSelectCoroutine += FolderSelectedCoroutine;
+        RemoveFromListFunction += BaseRemoveFromList;
+
+        RandomAssignFolderType();
+
+        if (animatedFolder)
         {
-            case FolderTypes.defaultFolder:
-                RandomAssignFolderType();
-                runDefault = true;
-                StartCoroutine(DefaultFolderCoroutine());
-                break;
-            case FolderTypes.encryptedFolder:
-                AssignEncryptedFileName();
-                runDefault = true;
-                StartCoroutine(DefaultFolderCoroutine());
-                break;
-            default:
-                RandomAssignFolderType();
-                break;
+            StartFolderAnim();
         }
-        switch (animatedFolder)
+        else
         {
-            case AnimatedFolder.folderAnim:
-                StartFolderAnim();
-                break;
-            case AnimatedFolder.noFolderAnim:
-                ChangeHighlightVisual("NoHighlight");
-                break;
-            default:
-                StartFolderAnim();
-                break;
+            ChangeHighlightVisual("NoHighlight");
         }
     }
 
@@ -161,13 +141,53 @@ public class FolderClass : MonoBehaviour
         fileName.text = fileNameList[Random.Range(0, fileNameList.Length)];
     }
 
+    public void AssignFolderType(string folderType)
+    {
+        gameObject.tag = folderType;
+        if (CompareTag("Malware"))
+        {
+            fileNameList = new string[] { "fr33m0n3y", "PROOFbigfootisreal", "if-you-delete-me-you-die", "clerksFullMovieHD", "64M3T0RR3NT5",
+                "open.source.hacks", "install-all-games.exe", "watch-movies-online.exe", "FREE-EPHONE.exe", "0N3W31RDTR1CK.exe",
+                "virus.exe", "realAntivirus.exe", "actualAntivirus.exe", "forrealAntivirus.exe", "notaVirus.exe", "DeerHunter3DCRACKED.exe"};
+            RendererList[1].sprite = malwareSPR;
+        }
+        else if (CompareTag("Personal"))
+        {
+            fileNameList = new string[] { "HawaiiTrip94", "quarterly-reports-89", "LisaSchoolwork", "college_junk", "personal_stuff",
+                "tax_info", "lisaRecital", "medicalForms", "lisaPaintings", "riskNewProject", "Solitaire", "Pirate Adventure", "Paint",
+                "Calculator", "Calendar", "DVD Burner", "Mailbox", "Photo Gallery", "Deer Hunter 3D", "Techno Bowl ‘95", "quarterly-reports-88",
+                "quarterly-reports-87", "netWorthAnalysis", "MapJourney", "EasyBreeze Player", "Audio Player", "3D Design Tools"};
+            RendererList[1].sprite = personalSPR;
+        }
+        fileName.text = fileNameList[Random.Range(0, fileNameList.Length)];
+    }
+
+    public void AssignFolderTypeAndName(string folderType, string folderName)
+    {
+        gameObject.tag = folderType;
+        if (CompareTag("Malware"))
+        {
+            RendererList[1].sprite = malwareSPR;
+        }
+        else if (CompareTag("Personal"))
+        {
+            RendererList[1].sprite = personalSPR;
+        }
+        fileName.text = folderName;
+    }
+
     protected void StartFolderAnim()
     {
         ChangeHighlightVisual("NoHighlight");
         StartCoroutine(AnimationCoroutine());
     }
 
-    void ChangeAnimation()
+    protected void ChooseSpawnSFX()
+    {
+        //.clip = SFXData.audioClips[Random.Range(0, SFXData.audioClips.Count)];
+    }
+
+    private void ChangeAnimation()
     {
         StartCoroutine(AnimationCoroutine());
     }
@@ -198,43 +218,126 @@ public class FolderClass : MonoBehaviour
 
     public void ChangeHighlightVisual(string variant)
     {
-        if (variant != highlightState.ToString())
+        if (interactable)
         {
-            if (variant == "NoHighlight")
+            if (variant != highlightState.ToString())
             {
-                highlightState = HighlightState.NoHighlight;
-                // Text is white and normal
-                fileName.color = white;
-                fileName.fontStyle = FontStyles.Normal;
-                // Folder and Text Highlight Off
-                foreach (SpriteRenderer rndr in HighlightList)
+                if (variant == "NoHighlight")
                 {
-                    rndr.enabled = false;
+                    highlightState = HighlightState.NoHighlight;
+                    // Text is white and normal
+                    fileName.color = white;
+                    fileName.fontStyle = FontStyles.Normal;
+                    // Folder and Text Highlight Off
+                    foreach (SpriteRenderer rndr in HighlightList)
+                    {
+                        rndr.enabled = false;
+                    }
+                }
+                else if (variant == "MouseOver")
+                {
+                    highlightState = HighlightState.MouseOver;
+                    // Text is blue and normal
+                    fileName.color = blue;
+                    fileName.fontStyle = FontStyles.Normal;
+                    // Folder and Text Highlight Off
+                    foreach (SpriteRenderer rndr in HighlightList)
+                    {
+                        rndr.enabled = false;
+                    }
+                }
+                else if (variant == "HoldingFolder")
+                {
+                    highlightState = HighlightState.HoldingFolder;
+                    // Text is white and underlined
+                    fileName.color = white;
+                    fileName.fontStyle = FontStyles.Underline;
+                    // Folder and Text Highlight On
+                    foreach (SpriteRenderer rndr in HighlightList)
+                    {
+                        rndr.enabled = true;
+                    }
                 }
             }
-            else if (variant == "MouseOver")
+        }
+    }
+
+    public void ResetHighlight()
+    {
+        StartCoroutine(ResetHighlightCoroutine());
+    }
+
+    public void NoHighlight()
+    {
+        // Text is white and normal
+        fileName.color = white;
+        fileName.fontStyle = FontStyles.Normal;
+        // Folder and Text Highlight Off
+        foreach (SpriteRenderer rndr in HighlightList)
+        {
+            rndr.enabled = false;
+        }
+        highlightState = HighlightState.NoHighlight;
+    }
+
+    private IEnumerator ResetHighlightCoroutine()
+    {
+        yield return new WaitForSeconds(.5f);
+        NoHighlight();
+    }
+
+    private float startScale;
+    public GameObject spawnAnimPrefab;
+    /// <summary>
+    /// Plays the animation for the folder spawn
+    /// </summary>
+    /// <returns></returns>
+    protected IEnumerator FolderSpawnAnimationCoroutine()
+    {
+        if (spawnAnimPrefab != null)
+        {
+            //ChooseSpawnSFX();
+            folderAudio.Play();
+            startScale = transform.localScale.x;
+            affectedByAbility = true;
+            GameObject obj = Instantiate(spawnAnimPrefab, transform.position, Quaternion.identity);
+            transform.localScale = new Vector3(0, 0, 0);
+            Destroy(obj, 2);
+            yield return new WaitForSeconds(.5f);
+            transform.localScale = new Vector3(startScale, startScale, startScale);
+            yield return new WaitForSeconds(.2f);
+        }
+        InitializeFolderBehavior();
+    }
+
+    /// <summary>
+    /// Runs once the Folder is active after the spawn animation
+    /// </summary>
+    public virtual void InitializeFolderBehavior()
+    {
+        affectedByAbility = false;
+        runDefault = true;
+        StartCoroutine(DefaultFolderCoroutine());
+    }
+
+    public virtual void OnEnable()
+    {
+        runDefault = true;
+        StartCoroutine(DefaultFolderCoroutine());
+    }
+
+    /// <summary>
+    /// Drops the folder you are holding if you alt tab
+    /// </summary>
+    /// <param name="focus"></param>
+    private void OnApplicationFocus(bool focus)
+    {
+        if (!focus)
+        {
+            if (gameCursor.holdingFolder && gameCursor.selectedFolder == folderClass)
             {
-                highlightState = HighlightState.MouseOver;
-                // Text is blue and normal
-                fileName.color = blue;
-                fileName.fontStyle = FontStyles.Normal;
-                // Folder and Text Highlight Off
-                foreach (SpriteRenderer rndr in HighlightList)
-                {
-                    rndr.enabled = false;
-                }
-            }
-            else if (variant == "HoldingFolder")
-            {
-                highlightState = HighlightState.HoldingFolder;
-                // Text is white and underlined
-                fileName.color = white;
-                fileName.fontStyle = FontStyles.Underline;
-                // Folder and Text Highlight On
-                foreach (SpriteRenderer rndr in HighlightList)
-                {
-                    rndr.enabled = true;
-                }
+                //Debug.Log("Dropped");
+                DropFolder();
             }
         }
     }
@@ -247,7 +350,10 @@ public class FolderClass : MonoBehaviour
             // Drops folder if paused
             if (PauseMenu.isPaused)
             {
-                DropFolder();
+                if (gameCursor.holdingFolder && gameCursor.selectedFolder == folderClass)
+                {
+                    DropFolder();
+                }
             }
             // Handles Highlight Visuals
             else if (!abilityDrag && !PopUp.popUpActive && !isSelected)
@@ -264,37 +370,33 @@ public class FolderClass : MonoBehaviour
                     ChangeHighlightVisual("NoHighlight");
                 }
             }
-            // Drops folder if a pop up is active
-            if (PopUp.popUpActive)
-            {
-                DropFolder();
-            }
             // Folder is dropped if Left Mouse is let go of
             else if (Input.GetMouseButtonUp(0))
             {
-                DropFolder();
+                if (gameCursor.holdingFolder && gameCursor.selectedFolder == folderClass)
+                {
+                    DropFolder();
+                }
             }
             yield return null;
         }
     }
 
-    void DropFolder()
+    protected virtual void DropFolder()
     {
+        isSelected = false;
+        gameCursor.holdingFolder = false;
+        gameCursor.selectedFolder = null;
+
         if (highlightState.ToString() != "NoHighlight")
         {
             ChangeHighlightVisual("NoHighlight");
         }
-        if (isSelected)
-        {
-            isSelected = false;
-        }
-        if (gameCursor.holdingFolder && gameCursor.selectedFolder == this)
-        {
-            gameCursor.holdingFolder = false;
-            gameCursor.selectedFolder = null;
-        }
     }
 
+
+    protected delegate IEnumerator CoroutineDelegate();
+    protected CoroutineDelegate folderSelectCoroutine;
     protected IEnumerator FolderSelectedCoroutine()
     {
         // Normal mouse click selection & dragging
@@ -304,12 +406,66 @@ public class FolderClass : MonoBehaviour
             {
                 ChangeHighlightVisual("HoldingFolder");
             }
-            Vector2 pos = ReferenceManager.instance.cursorOBJ.transform.position;
+            Vector2 pos = gameCursor.transform.position;
             pos.x += xOffset;
             pos.y += yOffset;
             transform.position = pos;
             yield return new WaitForEndOfFrame();
         }
+    }
+
+    public virtual void OnMouseOver()
+    {
+        if (interactable)
+        {
+            // Hovering over the folder
+            if (!PopUp.popUpActive && !gameCursor.holdingFolder && !PauseMenu.isPaused)
+            {
+                MouseOver = true;
+                isMouseOver = true;
+                gameCursor.UpdateSprite(GameCursor.CursorState.Selected);
+                // Dragging the folder
+                if (Input.GetMouseButtonDown(0) && !isSelected)
+                {
+                    isSelected = true;
+                    gameCursor.selectedFolder = folderClass;
+                    gameCursor.holdingFolder = true;
+                    StartCoroutine(folderSelectCoroutine());
+                }
+            }
+        }
+    }
+
+    public void ModifyFolderSpeed(bool increaseSpeed)
+    {
+        if (increaseSpeed)
+        {
+            StartCoroutine(IncreaseSpeedCoroutine());
+        }
+        else
+        {
+            StartCoroutine(DecreaseSpeedCoroutine());
+        }
+    }
+
+    public virtual IEnumerator IncreaseSpeedCoroutine()
+    {
+        while (gameObject.activeSelf && movingFolderStruct.currentSpeed < movingFolderStruct.maxSpeed && movingFolderStruct.accelerated)
+        {
+            movingFolderStruct.currentSpeed += Time.deltaTime;
+            yield return null;
+        }
+        movingFolderStruct.currentSpeed = movingFolderStruct.maxSpeed;
+    }
+
+    public virtual IEnumerator DecreaseSpeedCoroutine()
+    {
+        while (gameObject.activeSelf && movingFolderStruct.currentSpeed > movingFolderStruct.defaultSpeed && !movingFolderStruct.accelerated)
+        {
+            movingFolderStruct.currentSpeed -= Time.deltaTime * 2;
+            yield return null;
+        }
+        movingFolderStruct.currentSpeed = movingFolderStruct.defaultSpeed;
     }
 
     private void OnMouseExit()
@@ -336,6 +492,17 @@ public class FolderClass : MonoBehaviour
 
     #endregion
 
+    protected Vector2 FolderAreaHeightBounds = new Vector2(-3.0f, 1.9f);
+    protected Vector2 FolderAreaWidthBounds = new Vector2(-4.4f, 4.2f);
+
+    public Vector3 GetRandomSpawnPosition()
+    {
+        float spawnY = Random.Range(FolderAreaHeightBounds.x, FolderAreaHeightBounds.y);
+        float spawnX = Random.Range(FolderAreaWidthBounds.x, FolderAreaWidthBounds.y);
+        Vector3 spawnPosition = new Vector3(spawnX, spawnY, 0);
+        return spawnPosition;
+    }
+
     #region Cursor to Folder Offset 
 
     protected float xOffset;
@@ -351,52 +518,84 @@ public class FolderClass : MonoBehaviour
     {
         while (!abilityDrag && !PopUp.popUpActive && MouseOver && !isSelected)
         {
-            xOffset = transform.position.x - ReferenceManager.instance.cursorOBJ.transform.position.x;
-            yOffset = transform.position.y - ReferenceManager.instance.cursorOBJ.transform.position.y;
+            xOffset = transform.position.x - ReferenceManager.Instance.cursorOBJ.transform.position.x;
+            yOffset = transform.position.y - ReferenceManager.Instance.cursorOBJ.transform.position.y;
             yield return null;
         }
     }
 
     #endregion
 
-    public void AssignFolderType(string folderType)
+    public virtual void FreezeInteractable()
     {
-        gameObject.tag = folderType;
-        if (CompareTag("Malware"))
-        {
-            fileNameList = new string[] { "fr33m0n3y", "PROOFbigfootisreal", "if-you-delete-me-you-die", "clerksFullMovieHD", "64M3T0RR3NT5",
-                "open.source.hacks", "install-all-games.exe", "watch-movies-online.exe", "FREE-EPHONE.exe", "0N3W31RDTR1CK.exe",
-                "virus.exe", "realAntivirus.exe", "actualAntivirus.exe", "forrealAntivirus.exe", "notaVirus.exe", "DeerHunter3DCRACKED.exe"};
-            RendererList[1].sprite = malwareSPR;
-        }
-        else if (CompareTag("Personal"))
-        {
-            fileNameList = new string[] { "HawaiiTrip94", "quarterly-reports-89", "LisaSchoolwork", "college_junk", "personal_stuff",
-                "tax_info", "lisaRecital", "medicalForms", "lisaPaintings", "riskNewProject", "Solitaire", "Pirate Adventure", "Paint",
-                "Calculator", "Calendar", "DVD Burner", "Mailbox", "Photo Gallery", "Deer Hunter 3D", "Techno Bowl ‘95", "quarterly-reports-88",
-                "quarterly-reports-87", "netWorthAnalysis", "MapJourney", "EasyBreeze Player", "Audio Player", "3D Design Tools"};
-            RendererList[1].sprite = personalSPR;
-        }
-        fileName.text = fileNameList[Random.Range(0, fileNameList.Length)];
+        interactable = false;
+        affectedByAbility = true;
     }
 
-    public void OnDestroy()
+    public virtual void ResetInteractable()
     {
-        isMouseOver = false;
-        gameCursor.UpdateSprite(GameCursor.CursorState.NotSelected);
-        FolderManager.instance.allFolders.Remove(gameObject);
+        interactable = true;
+        affectedByAbility = false;
+    }
+
+    public delegate void delegateFunction();
+    public delegateFunction RemoveFromListFunction;
+    public void BaseRemoveFromList()
+    {
+        if (FolderManager.Instance.allFolders.Contains(this))
+        {
+            FolderManager.Instance.allFolders.Remove(this);
+        }
+
         if (CompareTag("Malware"))
         {
-            FolderManager.instance.malwareFolders.Remove(gameObject);
+            FolderManager.Instance.malwareFolders.Remove(this);
         }
         else if (CompareTag("Personal"))
         {
-            FolderManager.instance.personalFolders.Remove(gameObject);
+            FolderManager.Instance.personalFolders.Remove(this);
         }
-        if (gameCursor.selectedFolder == this)
+        if (FolderManager.Instance.NonSpiderFolderList.Contains(this))
         {
-            gameCursor.selectedFolder = null;
-            gameCursor.holdingFolder = false;
+            FolderManager.Instance.NonSpiderFolderList.Remove(this);
+        }
+        if (movingFolder)
+        {
+            FolderManager.Instance.MovingFolderList.Remove(this);
+        }
+        if (!rareFolder)
+        {
+            FolderManager.Instance.NonRareFolderList.Remove(gameObject);
+        }
+        RemoveFromListFunction -= BaseRemoveFromList;
+    }
+
+    public void RemoveFromTrappedList()
+    {
+        FolderManager.Instance.TrappedFolderList.Remove(this);
+        RemoveFromListFunction -= RemoveFromTrappedList;
+    }
+
+    public delegate void delegateFromOtherScript(FolderClass folderClass);
+    public delegateFromOtherScript OtherScriptRemoveFromListFunction;
+
+    protected virtual void OnDestroy()
+    {
+        RemoveFromListFunction();
+
+        OtherScriptRemoveFromListFunction?.Invoke(this);
+
+        folderSelectCoroutine -= FolderSelectedCoroutine;
+        isMouseOver = false;
+        if (gameCursor != null)
+        {
+            gameCursor.UpdateSprite(GameCursor.CursorState.NotSelected);
+
+            if (gameCursor.selectedFolder == this)
+            {
+                gameCursor.selectedFolder = null;
+                gameCursor.holdingFolder = false;
+            }
         }
     }
 }
