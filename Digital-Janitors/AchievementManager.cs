@@ -21,7 +21,7 @@ public class AchievementManager : MonoBehaviour
 
             LoadAchievementData();
             InitializeAchievementIDs();
-            //TryUnlockAchievements();
+            TryUnlockAchievements();
         }
         else
         {
@@ -30,6 +30,7 @@ public class AchievementManager : MonoBehaviour
     }
     #endregion
 
+    // Parses the Text File & populates a list of AchievementDataObjects 
     public void GetAchievementsFromTextFile(TextAsset achievementData)
     {
         string[] data = achievementData.text.Split(new char[] { '\n' });
@@ -48,6 +49,7 @@ public class AchievementManager : MonoBehaviour
         }
     }
 
+    // Populates a list of strings which is used to access achievements from any script
     private void InitializeAchievementIDs()
     {
         for (int i = 0; i < AchievementDataObjectList.Count; i++)
@@ -56,6 +58,7 @@ public class AchievementManager : MonoBehaviour
         }
     }
 
+    // Saves the achievement data into storage
     public void SaveAchievementData()
     {
         AchievementData achievementData = new AchievementData(this);
@@ -64,6 +67,7 @@ public class AchievementManager : MonoBehaviour
         SaveSystem.SaveData("achievement_data", plainTextBytes);
     }
 
+    // Loads the achievement data from storage
     public void LoadAchievementData()
     {
         byte[] achievementData = SaveSystem.LoadData("achievement_data");
@@ -79,6 +83,7 @@ public class AchievementManager : MonoBehaviour
         }
     }
 
+    // If the required amount has been met, unlock the achievement
     private void CheckAchievementProgress(AchievementDataObject achievement)
     {
         if (achievement.CurrentAmount >= achievement.AmountRequired)
@@ -87,6 +92,7 @@ public class AchievementManager : MonoBehaviour
         }
     }
 
+    // Whether the achievements has already been unlocked or not
     public bool IsAchievementUnlocked(string id)
     {
         if (AchievementIDs.Contains(id))
@@ -100,6 +106,7 @@ public class AchievementManager : MonoBehaviour
         }
     }
 
+    // Sets the achievement as unlocked and triggers a Steam achievement unlock if SteamManager is active 
     public void UnlockAchievement(AchievementDataObject achievement)
     {
         achievement.Unlocked = true;
@@ -110,6 +117,7 @@ public class AchievementManager : MonoBehaviour
         SaveAchievementData();
     }
 
+    // Takes an achievementID and unlocks the associated achievement if it exists
     public void UnlockAchievementByID(string id)
     {
         if (AchievementIDs.Contains(id))
@@ -135,6 +143,7 @@ public class AchievementManager : MonoBehaviour
         }
     }
 
+    // Takes an achievementID and returns the associated AchievementDataObject
     public AchievementDataObject GetAchievementObjectByID(string ID)
     {
         if (AchievementIDs.Contains(ID))
@@ -145,6 +154,7 @@ public class AchievementManager : MonoBehaviour
         else return null;
     }
 
+    // Increases the achievement's progress by a value of 1
     private void IncrementAchievementProgress(AchievementDataObject achievement)
     {
         if (!achievement.Unlocked)
@@ -154,6 +164,7 @@ public class AchievementManager : MonoBehaviour
         }
     }
 
+    // Takes an achievementID and Increases the achievement's progress by a value of 1
     public void CallIncrementFromAchievementID(string id)
     {
         if (AchievementIDs.Contains(id))
