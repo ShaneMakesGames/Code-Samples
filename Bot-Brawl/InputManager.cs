@@ -1,12 +1,13 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using TMPro;
 using UnityEditor;
 using System;
 
-public class InputManager : MonoBehaviour
+public abstract class InputManager : MonoBehaviour
 {
 
     #region Variables
@@ -14,43 +15,53 @@ public class InputManager : MonoBehaviour
     private Gamepad gamepad; 
     private PlayerControls controls;
     [Header("Input")]
-    public TextMeshProUGUI inputText;
-    public TextMeshProUGUI xInputText;
-    public TextMeshProUGUI yInputText;
-    public string currentDirectionalInput; // The direction the player is holding on their thumbstick
+    public int previousDirectionalInput;
+    public int currentDirectionalInput; // The direction the player is holding on their thumbstick
+    public string previousButtonInput;
     public string currentButtonInput; // The button the player pushed
     [Header("Character Data")] // Used to import character specific data
     public CharacterData characterData;
     [Header("Normals")] // Lists of the character's normal attacks
+    public List<NormalAttack> AllNormals = new List<NormalAttack>();
     private List<string> AllNormalNames = new List<string>();
-    private List<NormalAttack> AllNormals = new List<NormalAttack>();
-    public List<NormalAttack> LightNormals = new List<NormalAttack>();
-    public List<NormalAttack> MediumNormals = new List<NormalAttack>();
-    public List<NormalAttack> HeavyNormals = new List<NormalAttack>();
     [Header("Uniques")]
     public List<UniqueMove> Uniques = new List<UniqueMove>();
     [Header("Specials")]
     public List<SpecialMove> Specials = new List<SpecialMove>();
+    [Header("Hurtbox States")]
+    public bool FullInvulnerability;
+    public bool StrikeInvulnerability;
+    public bool ThrowInvulnerability;
+    public bool ProjectileInvulnerability;
+    public bool inBlockstun;
+    public bool inHitstun;
+    [Header("Input States")]
+    public bool canBlock;
+    public bool canAttack;
+    public bool canMove;
     [Header("State Info")]
     public bool isAttacking;
-    public bool isRunning;
+    public bool isGroundDashing;
     public bool SpecialMoveActivated; // The motion for a special move has been completed
     public bool UniqueActivated;
-    public bool inHitstun;
-    private bool normalChained; // Used to chain normal attacks into other normal attacks
+    private bool normalChainBuffered; // Used to chain normal attacks into other normal attacks
     private bool uniqueChained; // Used to chain normal attacks into unique
 
     [Header("Air")]
     public float yVelocity;
+    public bool inPreJump;
     public bool isJumping;
     public bool inAir;
     public bool isFalling;
+    protected bool canAirDash;
+    public bool isAirDashing;
+    protected bool airDashBuffered;
 
     [Header("Transform")]
     public Rigidbody2D charRB;
-    private float xVector, yVector;
-    private Vector2 moveVector;
-    private bool collidingWithOpponent;
+    protected float xVector, yVector;
+    protected Vector2 moveVector;
+    protected bool collidingWithOpponent;
     public float movementMultiplier = 1f;
 
     public int totalFrames;
@@ -66,17 +77,29 @@ public class InputManager : MonoBehaviour
     // The current state of your normal attack
     public NormalAttackState normalAttackState;
 
-    private NormalAttack currentNormal;
+    public NormalAttack currentNormal;
+    public NormalAttack bufferedNormal;
 
     [Header("Animation")]
     public Animator anim;
 
-    public GameObject hitboxPrefab;
-    private Keyboard keyboard;
+    [Header("Hitboxes")]
+    protected AttackHitbox activeHitbox;
+    public Transform hitboxParent;
+
+    protected Keyboard keyboard;
+    public Player2Test player2;
+
+    protected List<int> rightDirectionalInputs = new List<int>();
+    protected List<int> leftDirectionalInputs = new List<int>();
+
+    [Header("Display")]
+    public TextMeshProUGUI directionalInputText;
+    public List<Image> ButtonInputMasks = new List<Image>();
 
     #endregion
 
-    void Awake()
+    protected virtual void Awake()
     {
         keyboard = Keyboard.current;
         gamepad = Gamepad.current;
@@ -86,14 +109,30 @@ public class InputManager : MonoBehaviour
         controls = new PlayerControls();
         controls.Gameplay.Movement.performed += ctx => CheckInputDirection();
         //controls.Gameplay.KeyboardMovement.started += ctx => KeyboardCheckInputDirection();
-        controls.Gameplay.Button.performed += ctx => CheckButtonInput();
+        //controls.Gameplay.Button.performed += ctx => CheckButtonInput();
 
         AddCharacterData(characterData);
+        SetupHitboxes();
 
-        Specials[0].SpecialMoveFunction += DPTest;
-        Specials[1].SpecialMoveFunction += SpecialMoveTest;
-        Uniques[2].UniqueMoveFunction += SquallDash;
+        leftDirectionalInputs.Add(4);
+        leftDirectionalInputs.Add(7);
+
+        rightDirectionalInputs.Add(6);
+        rightDirectionalInputs.Add(9);
     }
+
+    public void SetupHitboxes()
+    {
+        for (int i = 0; i < AllNormals.Count; i++)
+        {
+            GameObject hitboxOBJ = hitboxParent.GetChild(i).gameObject;
+            AttackHitbox hitbox = hitboxParent.GetChild(i).GetComponent<AttackHitbox>();
+            AllNormals[i].AttackHitbox = hitbox;
+            hitbox.inputManager = this;
+            hitboxOBJ.SetActive(false);
+        }
+    }
+
 
     /// <summary>
     /// Adds character specific data as variables 
@@ -101,13 +140,12 @@ public class InputManager : MonoBehaviour
     /// <param name="charData"></param>
     private void AddCharacterData(CharacterData charData)
     {
-        LightNormals = charData.LightNormals;
-        AddNormalsToList(LightNormals);
-        MediumNormals = charData.MediumNormals;
-        AddNormalsToList(MediumNormals);
-        HeavyNormals = charData.HeavyNormals;
-        AddNormalsToList(HeavyNormals);
+        AddNormalsToList(charData.LightNormals);
+        AddNormalsToList(charData.MediumNormals);
+        AddNormalsToList(charData.HeavyNormals);
+        AddNormalsToList(charData.AirNormals);
         Uniques = charData.Uniques;
+        AddNormalsFromUniques(characterData.Uniques);
         Specials = charData.Specials;
     }
 
@@ -117,46 +155,569 @@ public class InputManager : MonoBehaviour
         {
             AllNormals.Add(normals[i]);
             AllNormalNames.Add(normals[i].MoveName);
+            if (normals[i].multiHitData != null) // If it is multi-hitting
+            {
+                for (int multiInt = 0; multiInt < normals[i].multiHitData.multiHits.Count; multiInt++) // Adds all multi-hits to normal lists
+                {
+                    AllNormals.Add(normals[i].multiHitData.multiHits[multiInt]);
+                    AllNormalNames.Add(normals[i].multiHitData.multiHits[multiInt].MoveName);
+                }
+            }
+        }
+    }
+
+    private void AddNormalsFromUniques(List<UniqueMove> uniques)
+    {
+        for (int i = 0; i < uniques.Count; i++)
+        {
+            if (uniques[i].FollowUpAttacks.Count > 0) // If it is multi-hitting
+            {
+                for (int followUpNum = 0; followUpNum < uniques[i].FollowUpAttacks.Count; followUpNum++) // Adds all multi-hits to normal lists
+                {
+                    AllNormals.Add(uniques[i].FollowUpAttacks[followUpNum]);
+                    AllNormalNames.Add(uniques[i].FollowUpAttacks[followUpNum].MoveName);
+                }
+            }
         }
     }
 
     private void Update()
     {
-        KeyboardCheckInputDirection();
+        //KeyboardCheckInputDirection();
         //KeyboardCheckForNoInput();
-        //CheckInputDirection();
-        //CheckButtonInput();
+        CheckInputDirection();
+        CheckButtonInput();
 
+        FacingOpponentCheck();
         Movement();
     }
 
-    private void Movement()
+    #region Movement
+
+    public string FacingDirection = "Right";
+    private void FacingOpponentCheck()
     {
-        transform.position = new Vector2(charRB.position.x, charRB.position.y - 1f);
-
-        if (!isAttacking && !SpecialMoveActivated && !UniqueActivated)
+        if (charRB.position.x < player2.rb.position.x)
         {
-            Vector2 moveDir = new Vector2(xVector, yVector);
-
-            if (collidingWithOpponent && currentDirectionalInput == "Forward")
+            if (FacingDirection != "Right")
             {
-                moveDir.x *= movementMultiplier;
+                FacingDirection = "Right";
+                charRB.transform.localScale = new Vector3(1, 1, 1);
             }
-
-            //charRB.MovePosition(charRB.position + moveDir * Time.deltaTime);
-            charRB.position += moveDir;
+        }
+        else
+        {
+            if (FacingDirection != "Left")
+            {
+                FacingDirection = "Left";
+                charRB.transform.localScale = new Vector3(-1, 1, 1);
+            }
         }
     }
 
-    private void SpecialMoveTest()
+    protected virtual void Movement()
     {
-        Debug.Log("Quarter Circle Forward Completed");
+        transform.position = new Vector2(charRB.position.x, charRB.position.y - 1f);
+
+        if (isAttacking && !inAir || SpecialMoveActivated || UniqueActivated || isAirDashing || !canMove)
+        {
+            return;
+        }
+
+        Vector2 moveDir = new Vector2(xVector, yVector);
+
+        if (isGroundDashing)
+        {
+            if (FacingDirection == "Right")
+            {
+                moveDir.x = 0.04f;
+            }
+            else
+            {
+                moveDir.x = -0.04f;
+            }
+        }
+
+        if (collidingWithOpponent && currentDirectionalInput == 6) // Forward
+        {
+            moveDir.x *= movementMultiplier;
+        }
+
+        //charRB.MovePosition(charRB.position + moveDir * Time.deltaTime);
+        if (currentDirectionalInput == 1 || currentDirectionalInput == 3)
+        {
+            moveDir.x = 0;
+        }
+
+        charRB.position += moveDir;
+
     }
 
-    private void DPTest()
+    protected Coroutine jumpCoroutine;
+    private IEnumerator JumpCoroutine()
     {
-        Debug.Log("Dragon Punch Completed");
+        inPreJump = true;
+        canBlock = false;
+        canAttack = false;
+        ThrowInvulnerability = true;
+        int framesPassed = 0;
+        while (framesPassed < 4)
+        {
+            yield return null;
+            framesPassed++;
+        }
+        framesPassed = 0;
+        inPreJump = false;
+        ThrowInvulnerability = false;
+        canBlock = true;
+        canAttack = true;
+        canAirDash = false;
+        inAir = true;
+        isJumping = true;
+        float jumpAmount = characterData.jumpHeight * 0.8f / 5;
+        while (framesPassed < 5)
+        {
+            yield return null;
+            yVector = jumpAmount;
+            framesPassed++;
+            if (framesPassed == 4)
+            {
+                canAirDash = true;
+            }
+        }
+        framesPassed = 0;
+        jumpAmount = characterData.jumpHeight * 0.2f / 6;
+        while (framesPassed < 6)
+        {
+            yield return null;
+            yVector = jumpAmount;
+            framesPassed++;
+        }
+        yield return null;
+        framesPassed = 0;
+        isJumping = false;
+        isFalling = true;
+        while (charRB.position.y > 1.001f)
+        {
+            yield return null;
+            yVector = -.065f;
+            framesPassed++;
+        }
+        //Debug.Log(20 + framesPassed);
+        OnLanding();
+        jumpCoroutine = null;
     }
+
+    private void OnLanding()
+    {
+        charRB.position = new Vector2(charRB.position.x, 1);
+        isFalling = false;
+        inAir = false;
+        isJumping = false;
+        yVector = 0;
+
+        if (isAttacking)
+        {
+            StopCoroutine(normalCoroutine);
+            activeHitbox.DisableHitbox();
+            StartCoroutine(LandingRecoveryCoroutine(4, true));
+        }
+        else
+        {
+            StartCoroutine(LandingRecoveryCoroutine(2, false));
+        }
+    }
+
+    private IEnumerator LandingRecoveryCoroutine(int recoveryFrames, bool wasAttacking)
+    {
+        canMove = false;
+        if (wasAttacking)
+        {
+            isAttacking = false;
+            canBlock = false;
+            canAttack = false;
+        }
+        int framesPassed = 0;
+        while (framesPassed < recoveryFrames)
+        {
+            yield return null;
+            framesPassed++;
+            if (wasAttacking && framesPassed < 2)
+            {
+                canBlock = true;
+                canAttack = true;
+            }
+        }
+        canMove = true;
+    }
+
+    private bool leftDashCheckRunning = false;
+    private IEnumerator CheckForDashLeftCoroutine()
+    {
+        leftDashCheckRunning = true;
+
+        string[] inputSequence = new string[3];
+        inputSequence[0] = "4/7";
+        inputSequence[1] = "1/2/3/5/6/8/9";
+        inputSequence[2] = "4/7";
+        for (int i = 0; i < inputSequence.Length; i++) // Loops through each input in the motion
+        {
+            // For multiple corect inputs, seperate each input with a '/'
+            List<int> correctDirectionalInputs = ParseDirectionalInput(inputSequence[i]);
+            CoroutineWithData _coroutineWithData = new CoroutineWithData(this, CompareDirectionalInputCoroutine(correctDirectionalInputs, 6));
+            yield return _coroutineWithData.MyCoroutine;
+            if (!(bool)_coroutineWithData.result)
+            {
+                leftDashCheckRunning = false;
+                yield break;
+            }
+            yield return null;
+        }
+
+        if (inAir || inPreJump) // Forward Sprint
+        {
+            AttemptAirDash();
+        }
+        else // Forward Air Dash
+        {
+            AttemptGroundDash();
+        }
+
+        leftDashCheckRunning = false;
+    }
+
+    private bool rightDashCheckRunning = false;
+    private IEnumerator CheckForDashRightCoroutine()
+    {
+        rightDashCheckRunning = true;
+
+        string[] inputSequence = new string[3];
+        inputSequence[0] = "6/9";
+        inputSequence[1] = "1/2/3/4/5/7/8";
+        inputSequence[2] = "6/9";
+        for (int i = 0; i < inputSequence.Length; i++) // Loops through each input in the motion
+        {
+            // For multiple corect inputs, seperate each input with a '/'
+            List<int> correctDirectionalInputs = ParseDirectionalInput(inputSequence[i]);
+            CoroutineWithData _coroutineWithData = new CoroutineWithData(this, CompareDirectionalInputCoroutine(correctDirectionalInputs, 6));
+            yield return _coroutineWithData.MyCoroutine;
+            if (!(bool)_coroutineWithData.result)
+            {
+                rightDashCheckRunning = false;
+                yield break;
+            }
+            yield return null;
+        }
+
+        if (inAir || inPreJump) // Forward Sprint
+        {
+            AttemptAirDash();
+        }
+        else // Forward Air Dash
+        {
+            AttemptGroundDash();
+        }
+
+        rightDashCheckRunning = false;
+    }
+
+    private void OnDashButton()
+    {
+        if (!isAttacking && !inBlockstun && !inHitstun)
+        {
+            if (inAir || inPreJump) // Air Dash
+            {
+                AttemptAirDash();
+            }
+            else // Ground Dash
+            {
+                AttemptGroundDash();
+            }
+        }
+    }
+
+    protected virtual bool CanGroundDash()
+    {
+        return !isGroundDashing;
+    }
+
+    protected void AttemptGroundDash()
+    {
+        if (!CanGroundDash())
+        {
+            return;
+        }
+
+        if (FacingDirection == "Right")
+        {
+            if (leftDirectionalInputs.Contains(currentDirectionalInput)) // Back
+            {
+                StartCoroutine(BackDashCoroutine());
+            }
+            else // Forward
+            {
+                StartCoroutine(ForwardDashCoroutine());
+            }
+        }
+        else if (FacingDirection == "Left")
+        {
+            if (rightDirectionalInputs.Contains(currentDirectionalInput)) // Back
+            {
+                StartCoroutine(BackDashCoroutine());
+            }
+            else // Forward
+            {
+                StartCoroutine(ForwardDashCoroutine());
+            }
+        }
+    }
+
+    protected virtual IEnumerator BackDashCoroutine()
+    {
+        isGroundDashing = true;
+        float directionToMove;
+        if (FacingDirection == "Right")
+        {
+            directionToMove = -1;
+        }
+        else
+        {
+            directionToMove = 1;
+        }
+
+        int framesPassed = 0;
+        float amountToMove = 0.75f;
+        amountToMove /= 12;
+        while (framesPassed < 12)
+        {
+            if (inBlockstun || inHitstun)
+            {
+                isGroundDashing = false;
+                yield break;
+            }
+            yield return null;
+            charRB.position += new Vector2(amountToMove * directionToMove, 0);
+            framesPassed++;
+        }
+        isGroundDashing = false;
+    }
+
+    protected virtual IEnumerator ForwardDashCoroutine()
+    {
+        isGroundDashing = true;
+        while (isGroundDashing)
+        {
+            if (FacingDirection == "Right")
+            {
+                if (!rightDirectionalInputs.Contains(currentDirectionalInput) && currentButtonInput != "Dash")
+                {
+                    isGroundDashing = false;
+                    yield break;
+                }
+            }
+            else if (FacingDirection == "Left")
+            {
+                if (!leftDirectionalInputs.Contains(currentDirectionalInput) && currentButtonInput != "Dash")
+                {
+                    isGroundDashing = false;
+                    yield break;
+                }
+            }
+            if (inBlockstun || inHitstun)
+            {
+                isGroundDashing = false;
+                yield break;
+            }
+            yield return null;
+        }
+        isGroundDashing = false;
+    }
+
+    protected void AttemptAirDash()
+    {
+        if (characterData.AirDashesUsed >= characterData.AirDashesAvailable || previousButtonInput == "Dash" | isAirDashing | airDashBuffered)
+        {
+            return;
+        }
+
+        if (FacingDirection == "Right")
+        {
+            if (leftDirectionalInputs.Contains(currentDirectionalInput)) // Back
+            {
+                if (!canAirDash && !airDashBuffered)
+                {
+                    StartCoroutine(BufferAirDashCoroutine(AirDashBackCoroutine()));
+                }
+                else
+                {
+                    StartCoroutine(AirDashBackCoroutine());
+                }
+            }
+            else // Forward
+            {
+                if (!canAirDash && !airDashBuffered)
+                {
+                    StartCoroutine(BufferAirDashCoroutine(AirDashForwardCoroutine()));
+                }
+                else
+                {
+                    StartCoroutine(AirDashForwardCoroutine());
+                }
+            }
+        }
+        else if (FacingDirection == "Left")
+        {
+            if (rightDirectionalInputs.Contains(currentDirectionalInput)) // Back
+            {
+                if (!canAirDash && !airDashBuffered)
+                {
+                    StartCoroutine(BufferAirDashCoroutine(AirDashBackCoroutine()));
+                }
+                else
+                {
+                    StartCoroutine(AirDashBackCoroutine());
+                }
+            }
+            else // Forward
+            {
+                if (!canAirDash && !airDashBuffered)
+                {
+                    StartCoroutine(BufferAirDashCoroutine(AirDashForwardCoroutine()));
+                }
+                else
+                {
+                    StartCoroutine(AirDashForwardCoroutine());
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Starts an air dash on the first frame after a jump has reached it's apex
+    /// </summary>
+    /// <param name="normal"></param>
+    /// <returns></returns>
+    private IEnumerator BufferAirDashCoroutine(IEnumerator coroutine)
+    {
+        airDashBuffered = true;
+        while (!inHitstun && !inBlockstun)
+        {
+            if (canAirDash && !inPreJump)
+            {
+                airDashBuffered = false;
+                StartCoroutine(coroutine);
+                break;
+            }
+            yield return null;
+        }
+    }
+
+
+    protected virtual IEnumerator AirDashBackCoroutine()
+    {
+        canAirDash = false;
+
+        isAirDashing = true;
+        float directionToMove;
+        if (FacingDirection == "Right")
+        {
+            directionToMove = -1;
+        }
+        else
+        {
+            directionToMove = 1;
+        }
+
+        // TODO : Air Dash Startup before movement
+         
+        int framesPassed = 0;
+        while (framesPassed < 4) // Start-up
+        {
+            yield return null;
+            framesPassed++;
+        }
+        framesPassed = 0;
+
+        isJumping = false;
+        if (jumpCoroutine != null)
+        {
+            StopCoroutine(jumpCoroutine);
+        }
+        Debug.Log(charRB.position.y);
+
+        float amountToMove = 1.25f;
+        amountToMove /= 12;
+        while (framesPassed < 12)
+        {
+            if (inBlockstun || inHitstun)
+            {
+                isAirDashing = false;
+                yield break;
+            }
+            yield return null;
+            charRB.position += new Vector2(amountToMove * directionToMove, 0);
+            framesPassed++;
+        }
+        isAirDashing = false;
+        while (charRB.position.y > 1.001f)
+        {
+            yield return null;
+            yVector = -.084f;
+        }
+        OnLanding();
+    }
+
+    protected virtual IEnumerator AirDashForwardCoroutine()
+    {
+        canAirDash = false;
+        isAirDashing = true;
+        float directionToMove;
+        if (FacingDirection == "Right")
+        {
+            directionToMove = 1;
+        }
+        else
+        {
+            directionToMove = -1;
+        }
+
+        int framesPassed = 0;
+        while (framesPassed < 4) // Start-up
+        {
+            yield return null;
+            framesPassed++;
+        }
+        framesPassed = 0;
+
+        isJumping = false;
+        if (jumpCoroutine != null)
+        {
+            StopCoroutine(jumpCoroutine);
+        }
+
+        float amountToMove = 2.5f;
+        amountToMove /= 16;
+        while (framesPassed < 16)
+        {
+            if (inBlockstun || inHitstun)
+            {
+                isAirDashing = false;
+                yield break;
+            }
+            yield return null;
+            charRB.position += new Vector2(amountToMove * directionToMove, 0);
+            framesPassed++;
+        }
+        isAirDashing = false;
+        while (charRB.position.y > 1.001f)
+        {
+            yield return null;
+            yVector = -.084f;
+        }
+        OnLanding();
+    }
+
+    #endregion
 
     #region Directional Input
 
@@ -206,167 +767,122 @@ public class InputManager : MonoBehaviour
         return xVector;
     }
 
+
+    public Vector2 showDirection;
     /// <summary>
-    /// Converts the vector2 value into a string (Ex. “DownForward”)
+    /// Converts the vector2 value into a single int for numpad notation (Ex. 6)
     /// </summary>
     /// <param name="vector2"></param>
     private void CalculateInputDirection(Vector2 vector2)
     {
         xVector = vector2.x * 0.02f;
 
-        string xString = XDirection(vector2.x);
-        string yString = YDirection(vector2.y);
+        showDirection = vector2;
+        previousDirectionalInput = currentDirectionalInput;
+        currentDirectionalInput = GetInputDirection(vector2);
+        //directionalInputText.text = "" + currentDirectionalInput;
 
-        currentDirectionalInput = GetInputDirection(xString, yString);
-        inputText.text = currentDirectionalInput;
-        xInputText.text = "X Input : " + vector2.x;
-        yInputText.text = "Y Input : " + vector2.y;
-
-        bool canSpecial = false;
         if (isAttacking)
         {
             if (currentNormal.specialCancelable)
             {
-                canSpecial = true;
+                for (int i = 0; i < Specials.Count; i++)
+                {
+                    TryCheckForMotionInput(Specials[i], currentDirectionalInput);
+                }
             }
         }
-        else
+
+        if (currentDirectionalInput > 6 && !inPreJump && !isJumping)
         {
-            canSpecial = true;
+            if (!isAttacking || isAttacking && currentNormal.jumpCancelable && normalAttackState == NormalAttackState.Recovery)
+            {
+                jumpCoroutine = StartCoroutine(JumpCoroutine());
+            }
         }
 
-        switch (currentDirectionalInput)
+        if (!isAttacking && !inBlockstun && !inHitstun)
         {
-            case "Forward":
-                if (canSpecial)
+            if (rightDirectionalInputs.Contains(currentDirectionalInput)) // Moving right
+            {
+                if (!rightDashCheckRunning)
                 {
-                    TryCheckForMotionInput(Specials[0]);
+                    StartCoroutine(CheckForDashRightCoroutine());
                 }
-                break;
-            case "Back":
-                break;
-            case "Down":
-                if (canSpecial)
+            }
+            else if (leftDirectionalInputs.Contains(currentDirectionalInput)) // Moving left
+            {
+                if (!leftDashCheckRunning)
                 {
-                    TryCheckForMotionInput(Specials[1]);
+                    StartCoroutine(CheckForDashLeftCoroutine());
                 }
-                break;
-            case "Neutral":
-                break;
+            }
+
+            if (!isGroundDashing && !isAirDashing)
+            {
+                for (int i = 0; i < Specials.Count; i++)
+                {
+                    TryCheckForMotionInput(Specials[i], currentDirectionalInput);
+                }
+            }
         }
 
-        if (currentDirectionalInput.Contains("Up") && !isJumping)
-        {
-            StartCoroutine(JumpCoroutine());
-        }
     }
 
-    private IEnumerator JumpCoroutine()
-    {
-        isJumping = true;
-        int framesPassed = 0;
-        float jumpAmount = 0.85f / 10;
-        while (framesPassed < 10)
-        {
-            yield return null;
-            yVector = jumpAmount;
-            framesPassed++;
-        }
-        jumpAmount = 0.15f / 10;
-        while (framesPassed < 20) // Start Up
-        {
-            yield return null;
-            yVector = jumpAmount;
-            framesPassed++;
-        }
-        yield return null;
-        framesPassed = 0;
-        while (charRB.position.y > 1.001f)
-        {
-            yield return null;
-            yVector = -.042f;
-            framesPassed++;
-        }
-        Debug.Log(20 + framesPassed);
-        charRB.position = new Vector2(charRB.position.x, 1);
-        isFalling = true;
-        isJumping = false;
-        yVector = 0;
-    }
-
+    [SerializeField]
+    private float deadZone = 0.35f;
     /// <summary>
-    /// Converts the float value of the x direction into the appropriate string
-    /// </summary>
-    /// <param name="f"></param>
-    /// <returns></returns>
-    private string XDirection(float f)
-    {
-        if (-0.5f < f && f < 0.5f)
-        {
-            return "Neutral";
-        }
-        else if (f <= -0.5f)
-        {
-            return "Back";
-        }
-        else if (f >= 0.5f)
-        {
-            return "Forward";
-        }
-        else
-        {
-            return "Error";
-        }
-    }
-
-    /// <summary>
-    /// Converts the float value of the y direction into the appropriate string
-    /// </summary>
-    /// <param name="f"></param>
-    /// <returns></returns>
-    private string YDirection(float f)
-    {
-        if (-0.5f < f && f < 0.5f)
-        {
-            return "Neutral";
-        }
-        else if (f <= -0.5f)
-        {
-            return "Down";
-        }
-        else if (f >= 0.5f)
-        {
-            return "Up";
-        }
-        else
-        {
-            return "Error";
-        }
-    }
-
-    /// <summary>
-    /// Returns the properly formatted input direction (Ex. DownBack)
+    /// Returns the properly formatted input direction (Ex. 1)
     /// </summary>
     /// <param name="xString"></param>
     /// <param name="yString"></param>
     /// <returns></returns>
-    private string GetInputDirection(string xString, string yString)
+    private int GetInputDirection(Vector2 vector2)
     {
-        if (xString == "Neutral" && yString == "Neutral") // Both x & y direction is neutral
+        if (vector2.y >= 0.5f)
         {
-            return "Neutral";
+            if (vector2.x <= -deadZone) 
+            {
+                return 7; // UpBack
+            }
+            else if (vector2.x >= deadZone)
+            {
+                return 9; // UpForward
+            }
+            else 
+            {
+                return 8; // Up
+            }
         }
-        else if (xString == "Neutral" && yString != "Neutral") // If x direction is neutral, only use y direction (Ex. Down)
+        else if (vector2.y <= -deadZone)
         {
-            return yString;
+            if (vector2.x <= -deadZone)
+            {
+                return 1; // DownBack
+            }
+            else if (vector2.x >= deadZone)
+            {
+                return 3; // DownForward
+            }
+            else
+            {
+                return 2; // Down
+            }
         }
-        else if (yString == "Neutral" && xString != "Neutral") // If y direction is neutral, only use x direction (Ex. Forward)
+        else
         {
-            return xString;
-        }
-        else // If neither x or y are neutral, use both directions (Ex. DownForward)
-        {
-            return yString + xString;
+            if (vector2.x <= -deadZone) 
+            {
+                return 4; // Back
+            }
+            else if (vector2.x >= deadZone) 
+            {
+                return 6; // Forward
+            }
+            else
+            {
+                return 5; // Neutral
+            }
         }
     }
 
@@ -380,71 +896,107 @@ public class InputManager : MonoBehaviour
     /// </summary>
     private void CheckButtonInput()
     {
-        if (!checkButtonRunning)
+        string buttonInput = "";
+        if (gamepad != null)
         {
-            string buttonInput = "";
-            if (gamepad != null)
+            if (gamepad.buttonWest.wasPressedThisFrame)
             {
-                if (gamepad.buttonSouth.isPressed)
-                {
-                    buttonInput = "Unique";
-                }
-                else if (gamepad.buttonWest.isPressed)
-                {
-                    buttonInput = "Light";
-                }
-                else if (gamepad.buttonNorth.isPressed)
-                {
-                    buttonInput = "Medium";
-                }
-                else if (gamepad.buttonEast.isPressed)
-                {
-                    buttonInput = "Heavy";
-                }
-                else if (gamepad.rightTrigger.isPressed)
-                {
-                    buttonInput = "Dash";
-                }
+                buttonInput = "Light";
             }
-            else if (keyboard != null)
+            else if (gamepad.buttonNorth.wasPressedThisFrame)
             {
-                if (keyboard.jKey.isPressed)
-                {
-                    buttonInput = "Light";
-                }
-                else if (keyboard.iKey.isPressed)
-                {
-                    buttonInput = "Medium";
-                }
-                else if (keyboard.kKey.isPressed)
-                {
-                    buttonInput = "Heavy";
-                }
-                else if (keyboard.spaceKey.isPressed)
-                {
-                    buttonInput = "Unique";
-                }
+                buttonInput = "Medium";
             }
-            StartCoroutine(DisplayButtonInputCoroutine(buttonInput));
+            else if (gamepad.buttonEast.wasPressedThisFrame)
+            {
+                buttonInput = "Heavy";
+            }
+            if (gamepad.buttonSouth.wasPressedThisFrame)
+            {
+                buttonInput = "Unique";
+            }
+            else if (gamepad.rightTrigger.isPressed)
+            {
+                buttonInput = "Dash";
+            }
         }
+        else if (keyboard != null)
+        {
+            if (keyboard.jKey.wasPressedThisFrame)
+            {
+                buttonInput = "Light";
+            }
+            else if (keyboard.iKey.wasPressedThisFrame)
+            {
+                buttonInput = "Medium";
+            }
+            else if (keyboard.kKey.wasPressedThisFrame)
+            {
+                buttonInput = "Heavy";
+            }
+            else if (keyboard.spaceKey.wasPressedThisFrame)
+            {
+                buttonInput = "Unique";
+            }
+            else if (keyboard.leftShiftKey.isPressed)
+            {
+                buttonInput = "Dash";
+            }
+        }
+        StartCoroutine(DisplayButtonInputCoroutine(buttonInput));
     }
+
 
     private IEnumerator DisplayButtonInputCoroutine(string _buttonInput)
     {
+        previousButtonInput = currentButtonInput;
         currentButtonInput = _buttonInput;
-        checkButtonRunning = true;
         if (_buttonInput == "Light" || _buttonInput == "Medium" || _buttonInput == "Heavy")
         {
+            DisplayAttackButton(_buttonInput);
             AttemptNormalAttack();
         }
         else if (_buttonInput == "Unique")
         {
             AttemptUnique();
         }
+        else if (_buttonInput == "Dash")
+        {
+            OnDashButton();
+        }
+        yield return null;
+    }
 
-        yield return new WaitForEndOfFrame();
-        currentButtonInput = null;
-        checkButtonRunning = false;
+    private void DisplayAttackButton(string _button)
+    {
+        switch (_button)
+        {
+            case "Light":
+                StartCoroutine(DisplayAttackButtonCoroutine(ButtonInputMasks[0]));
+                break;
+            case "Medium":
+                StartCoroutine(DisplayAttackButtonCoroutine(ButtonInputMasks[1]));
+                break;
+            case "Heavy":
+                StartCoroutine(DisplayAttackButtonCoroutine(ButtonInputMasks[2]));
+                break;
+        }
+    }
+
+    private IEnumerator DisplayAttackButtonCoroutine(Image mask)
+    {
+        Color newColor = mask.color;
+        newColor.a = 0;
+        mask.color = newColor;
+
+        while (mask.color.a < .6)
+        {
+            newColor.a = mask.color.a + Time.deltaTime;
+            mask.color = newColor;
+            yield return null;
+        }
+        newColor.a = .6f;
+        mask.color = newColor;
     }
 
     #endregion
@@ -459,7 +1011,20 @@ public class InputManager : MonoBehaviour
         for (int i = 0; i < AllNormals.Count; i++)
         {
             AllNormals[i].usedAmount = 0;
+            if (AllNormals[i].multiHitData != null)
+            {
+                AllNormals[i].multiHitData.multiHits[0].usedAmount = 0;
+            }
         }
+    }
+
+    /// <summary>
+    /// Resets your aerial options upon landing
+    /// </summary>
+    public void ResetAirOptions()
+    {
+        characterData.AirDashesUsed = 0;
+        characterData.JumpsUsed = 0;
     }
 
     /// <summary>
@@ -467,39 +1032,77 @@ public class InputManager : MonoBehaviour
     /// </summary>
     private void AttemptNormalAttack()
     {
-        if (!SpecialMoveActivated && !UniqueActivated)
+        if (SpecialMoveActivated || UniqueActivated)
         {
-            if (!isAttacking) // Normal attack from neutral
+            return;
+        }
+
+        if (!isAttacking) // Normal attack from neutral
+        {
+            if (canAttack)
             {
-                NormalAttack normal = GetNormalFromInput(currentButtonInput);
+                NormalAttack normal = GetNormalFromInput(currentButtonInput, currentDirectionalInput);
                 if (normal != null)
                 {
                     NormalAttackStartUp(normal);
                 }
             }
-            else if (!normalChained)
+            else
             {
-                if (normalAttackState != NormalAttackState.Recovery) // Buffer chain if not in recovery
+                NormalAttack normal = GetNormalFromInput(currentButtonInput, currentDirectionalInput);
+                if (normal != null)
                 {
-                    NormalAttack normal = GetChainableNormal(currentButtonInput); // Chain normal immediately if in recovery
-                    if (normal != null)
-                    {
-                        //Debug.Log("Chained Buffered");
-                        StartCoroutine(BufferChainCoroutine(normal));
-                    }
-                }
-                else
-                {
-                    NormalAttack normal = GetChainableNormal(currentButtonInput); // Chain normal immediately if in recovery
-                    if (normal != null)
-                    {
-                        //Debug.Log("Chained In Recovery");
-                        NormalAttackStartUp(normal);
-                    }
+                    StartCoroutine(BufferNormalCoroutine(normal));
                 }
             }
         }
+        else if (!normalChainBuffered && !attemptBufferNormal)
+        {
+            StartCoroutine(AttemptBufferNormalCoroutine(currentNormal, currentButtonInput, currentDirectionalInput));
+        }
+        else
+        {
+            bufferedNormal = GetNormalFromInput(currentButtonInput, currentDirectionalInput);
+        }
     }
+
+    private bool attemptBufferNormal = false;
+    private IEnumerator AttemptBufferNormalCoroutine(NormalAttack _currentNormal, string _buttonInput, int _directionalInput)
+    {
+        attemptBufferNormal = true;
+        int framesPassed = 0;
+        while (framesPassed < 6)
+        {
+            if (player2.inBlockstun || player2.inHitstun)
+            {
+                List<NormalAttack> Normals = GetNormalsFromNames(_currentNormal.ChainableNormals);
+                NormalAttack normal = GetChainableNormal(Normals, _buttonInput, _directionalInput);
+                if (normal != null)
+                {
+                    normalChainBuffered = true;
+                    StartCoroutine(BufferChainCoroutine(normal));
+                }
+                break;
+            }
+            framesPassed++;
+            yield return null;
+        }
+        attemptBufferNormal = false;
+    }
+
+    private IEnumerator BufferNormalCoroutine(NormalAttack normal)
+    {
+        while (!canAttack)
+        {
+            yield return null;
+        }
+
+        if (!inBlockstun || !inHitstun)
+        {
+            NormalAttackStartUp(normal);
+        }
+    }
+
 
     /// <summary>
     /// Starts a normal attack on the first frame after the current move has finished
@@ -512,7 +1115,10 @@ public class InputManager : MonoBehaviour
         {
             if (normalAttackState == NormalAttackState.Recovery)
             {
+                normalChainBuffered = false;
                 NormalAttackStartUp(normal);
+                yield return null;
+                BufferNextNormal();
                 yield break;
             }
             yield return null;
@@ -520,101 +1126,131 @@ public class InputManager : MonoBehaviour
     }
 
     /// <summary>
+    /// If a button was pressed this frame attempt that normal, otherwise attempt the normal that was buffered previously
+    /// </summary>
+    protected void BufferNextNormal()
+    {
+        if (currentButtonInput != "")
+        {
+            List<NormalAttack> Normals = GetNormalsFromNames(currentNormal.ChainableNormals);
+            NormalAttack normal = GetChainableNormal(Normals, currentButtonInput, currentDirectionalInput);
+            if (normal != null)
+            {
+                normalChainBuffered = true;
+                StartCoroutine(BufferChainCoroutine(normal));
+                bufferedNormal = null;
+            }
+        }
+        if (bufferedNormal != null)
+        {
+            normalChainBuffered = true;
+            StartCoroutine(BufferChainCoroutine(bufferedNormal));
+            bufferedNormal = null;
+        }
+    }
+
+    /// <summary>
     /// Returns a normal attack if it is able to be chained into, otherwise returns null
     /// </summary>
-    /// <param name="_input"></param>
+    /// <param name="_buttonInput"></param>
     /// <returns></returns>
-    private NormalAttack GetChainableNormal(string _input)
+    private NormalAttack GetChainableNormal(List<NormalAttack> _normals, string _buttonInput, int _directionalInput)
     {
-        switch (_input)
+        for (int i = 0; i < _normals.Count; i++)
         {
-            case "Light":
-                for (int i = 0; i < LightNormals.Count; i++)
+            List<int> correctDirectionalInputs = ParseDirectionalInput(_normals[i].DirectionalInput);
+            if (_normals[i].ButtonInput == _buttonInput && correctDirectionalInputs.Contains(_directionalInput))
+            {
+                return _normals[i];
+            }
+        }
+        return null;
+    }
+
+    protected NormalAttack GetNormalFromName(string normalName)
+    {
+        if (AllNormalNames.Contains(normalName))
+        {
+            return AllNormals[AllNormalNames.IndexOf(normalName)];
+        }
+        else
+        {
+            return null;
+        }
+    }
+
+    protected List<NormalAttack> GetNormalsFromNames(List<string> NormalNames)
+    {
+        List<NormalAttack> Normals = new List<NormalAttack>();
+        for (int i = 0; i < NormalNames.Count; i++)
+        {
+            if (AllNormalNames.Contains(NormalNames[i]))
+            {
+                int index = AllNormalNames.IndexOf(NormalNames[i]);
+                Normals.Add(AllNormals[index]);
+            }
+        }
+        return Normals;
+    }
+
+
+    /// <summary>
+    /// Returns a normal depending on the directional & button input
+    /// </summary>
+    /// <param name="_buttonInput"></param>
+    /// <returns></returns>
+    private NormalAttack GetNormalFromInput(string _buttonInput, int _directionalInput)
+    {
+        if (inAir)
+        {
+            for (int i = 0; i < characterData.AirNormals.Count; i++)
+            {
+                if (characterData.AirNormals[i].ButtonInput == _buttonInput)
                 {
-                    string[] correctDirectionalInputs = LightNormals[i].DirectionalInput.Split('/');
-                    if (ArrayUtility.Contains(correctDirectionalInputs, currentDirectionalInput))
+                    List<int> correctDirectionalInputs = ParseDirectionalInput(characterData.AirNormals[i].DirectionalInput);
+                    if (correctDirectionalInputs.Contains(_directionalInput))
                     {
-                        if (currentNormal.ChainableNormals.Contains(LightNormals[i].MoveName))
-                        {
-                            return LightNormals[i];
-                        }
-                        break;
+                        return characterData.AirNormals[i];
                     }
                 }
-                return null;
-            case "Medium":
-                for (int i = 0; i < MediumNormals.Count; i++)
+            }
+        }
+        else
+        {
+            for (int i = 0; i < AllNormals.Count; i++)
+            {
+                if (AllNormals[i].ButtonInput == _buttonInput)
                 {
-                    string[] correctDirectionalInputs = MediumNormals[i].DirectionalInput.Split('/');
-                    if (ArrayUtility.Contains(correctDirectionalInputs, currentDirectionalInput))
+                    List<int> correctDirectionalInputs = ParseDirectionalInput(AllNormals[i].DirectionalInput);
+                    if (correctDirectionalInputs.Contains(_directionalInput))
                     {
-                        if (currentNormal.ChainableNormals.Contains(MediumNormals[i].MoveName))
-                        {
-                            return MediumNormals[i];
-                        }
-                        break;
+                        return AllNormals[i];
                     }
                 }
-                return null;
-            case "Heavy":
-                for (int i = 0; i < HeavyNormals.Count; i++)
-                {
-                    string[] correctDirectionalInputs = HeavyNormals[i].DirectionalInput.Split('/');
-                    if (ArrayUtility.Contains(correctDirectionalInputs, currentDirectionalInput))
-                    {
-                        if (currentNormal.ChainableNormals.Contains(HeavyNormals[i].MoveName))
-                        {
-                            return HeavyNormals[i];
-                        }
-                        break;
-                    }
-                }
-                return null;
+            }
         }
         return null;
     }
 
     /// <summary>
-    /// Returns a normal depending on the directional & button input
+    /// Converts the string into a list of ints
     /// </summary>
-    /// <param name="_input"></param>
+    /// <param name="_directionalInput"></param>
     /// <returns></returns>
-    private NormalAttack GetNormalFromInput(string _input)
+    private List<int> ParseDirectionalInput(string _directionalInput)
     {
-        switch (_input)
+        List<int> ConvertedDirectionalInput = new List<int>();
+        int intCheck = 0;
+        string[] s = _directionalInput.Split('/');
+        for (int i = 0; i < s.Length; i++)
         {
-            case "Light":
-                for (int i = 0; i < LightNormals.Count; i++)
-                {
-                    string[] correctDirectionalInputs = LightNormals[i].DirectionalInput.Split('/');
-                    if (ArrayUtility.Contains(correctDirectionalInputs, currentDirectionalInput))
-                    {
-                        return LightNormals[i];
-                    }
-                }
-                break;
-            case "Medium":
-                for (int i = 0; i < MediumNormals.Count; i++)
-                {
-                    string[] correctDirectionalInputs = MediumNormals[i].DirectionalInput.Split('/');
-                    if (ArrayUtility.Contains(correctDirectionalInputs, currentDirectionalInput))
-                    {
-                        return MediumNormals[i];
-                    }
-                }
-                break;
-            case "Heavy":
-                for (int i = 0; i < HeavyNormals.Count; i++)
-                {
-                    string[] correctDirectionalInputs = HeavyNormals[i].DirectionalInput.Split('/');
-                    if (ArrayUtility.Contains(correctDirectionalInputs, currentDirectionalInput))
-                    {
-                        return HeavyNormals[i];
-                    }
-                }
-                break;
+            intCheck = int.Parse(s[i]);
+            if (intCheck != 0)
+            {
+                ConvertedDirectionalInput.Add(intCheck);
+            }
         }
-        return null;
+        return ConvertedDirectionalInput;
     }
 
     private Coroutine normalCoroutine;
@@ -624,6 +1260,7 @@ public class InputManager : MonoBehaviour
     /// <param name="normal"></param>
     private void NormalAttackStartUp(NormalAttack normal)
     {
+        currentNormal = normal;
         if (normal.usedAmount < normal.availableAmount) // Can use normal
         {
             if (normal.MoveName == "Short Upper")
@@ -634,21 +1271,23 @@ public class InputManager : MonoBehaviour
             {
                 anim.Play(normal.MoveName);
             }
-            GameObject obj = Instantiate(hitboxPrefab, new Vector2(charRB.position.x, charRB.position.y - 1), Quaternion.identity);
-            HitboxTest hitbox = obj.GetComponent<HitboxTest>();
+            //GameObject obj = Instantiate(hitboxPrefab, new Vector2(charRB.position.x, charRB.position.y - 1), Quaternion.identity);
+            //AttackHitbox hitbox = obj.GetComponent<AttackHitbox>();
             if (!isAttacking) // Normal out of neutral
             {
-                normalCoroutine = StartCoroutine(NormalFramesCoroutine(hitbox, normal));
+                normalCoroutine = StartCoroutine(NormalFramesCoroutine(normal));
             }
             else // Chaining a normal
             {
+                activeHitbox.isActive = false;
+                activeHitbox.gameObject.SetActive(false);
                 StopCoroutine(normalCoroutine);
-                normalCoroutine = StartCoroutine(NormalFramesCoroutine(hitbox, normal));
+                normalCoroutine = StartCoroutine(NormalFramesCoroutine(normal));
             }
         }
         else
         {
-            Debug.Log("Run out of uses");
+            //Debug.Log("Run out of uses");
         }
 
     }
@@ -660,7 +1299,7 @@ public class InputManager : MonoBehaviour
     /// <param name="hitbox"></param>
     /// <param name="normal"></param>
     /// <returns></returns>
-    private IEnumerator NormalFramesCoroutine(HitboxTest hitbox, NormalAttack normal)
+    private IEnumerator NormalFramesCoroutine(NormalAttack normal)
     {
         //StartCoroutine(FrameCounterCoroutine());
         currentNormal = normal;
@@ -677,7 +1316,8 @@ public class InputManager : MonoBehaviour
         //Debug.Log("Start-Up Complete");
         normalAttackState = NormalAttackState.Active;
         framesPassed = 0;
-        hitbox.HitboxSetup(normal, this);
+        ActivateHitbox(normal);
+        //hitbox.HitboxSetup(normal);
         while (framesPassed < normal.ActiveFrames) // Active Frames
         {
             yield return null;
@@ -692,10 +1332,20 @@ public class InputManager : MonoBehaviour
         }
         //Debug.Log("Continues Coroutine");
         //Debug.Log("Active Complete");
+        if (normal.multiHitData != null) // Multi-hitting normal
+        {
+            activeHitbox.isActive = false;
+            activeHitbox.gameObject.SetActive(false);
+            NormalAttackStartUp(normal.multiHitData.multiHits[0]); // TODO : More than one multi hits
+            yield break;
+        }
         normalAttackState = NormalAttackState.Recovery;
         framesPassed = 0;
-        hitbox.isActive = false;
-        normalChained = false;
+        if (activeHitbox != null)
+        {
+            activeHitbox.isActive = false;
+        }
+        normalChainBuffered = false;
         while (framesPassed < normal.RecoveryFrames) // RecoveryFrames
         {
             yield return null;
@@ -705,7 +1355,50 @@ public class InputManager : MonoBehaviour
         isAttacking = false;
         totalFrames = 0;
         currentNormal = null;
+        if (activeHitbox != null)
+        {
+            activeHitbox.gameObject.SetActive(false);
+        }
         //Debug.Log("Recovery Complete");
+    }
+
+    //private int hitboxIndex;
+    //private bool hitboxFound = false;
+    public void ActivateHitbox(NormalAttack normal)
+    {
+        normal.AttackHitbox.gameObject.SetActive(true);
+        normal.AttackHitbox.HitboxSetup(normal, FacingDirection == "Right" ? 1 : -1);
+        activeHitbox = normal.AttackHitbox;
+        
+        /*for (int i = 0; i < HitboxList.Count; i++) // Alternates through the pool of hitboxes
+        {
+            if (hitboxIndex >= HitboxList.Count)
+            {
+                hitboxIndex = 0;
+            }
+            activeHitbox = HitboxList[hitboxIndex];
+            if (!activeHitbox.gameObject.activeSelf)
+            {
+                hitboxIndex++;
+                hitboxFound = true;
+                break;
+            }
+            else
+            {
+                hitboxIndex++;
+            }
+        }
+
+        if (hitboxFound) // Activate hitbox
+        {
+            activeHitbox.gameObject.SetActive(true);
+            activeHitbox.HitboxSetup(normal);
+        }
+        else
+        {
+            activeHitbox = null;
+        }
+        */
     }
 
     /// <summary>
@@ -734,23 +1427,25 @@ public class InputManager : MonoBehaviour
                 framesPassed++;
                 totalFrames++;
             }
+            if (activeHitbox != null)
+            {
+                activeHitbox.isActive = false;
+            }
             //Debug.Log("Active Complete");
         }
         attackConnected = false;
-        if (normal.isMultiHitting) // Multi-hitting normal
+        if (normal.multiHitData != null) // Multi-hitting normal
         {
-            if (AllNormalNames.Contains(normal.multiHitNormalName))
-            {
-                int index = AllNormalNames.IndexOf(normal.multiHitNormalName);
-                NormalAttackStartUp(AllNormals[index]);
-            }
+            activeHitbox.isActive = false;
+            activeHitbox.gameObject.SetActive(false);
+            NormalAttackStartUp(normal.multiHitData.multiHits[0]); // TODO : More than one multi hits
             yield break;
         }
         else
         {
             normalAttackState = NormalAttackState.Recovery;
             framesPassed = 0;
-            normalChained = false;
+            normalChainBuffered = false;
             while (framesPassed < normal.RecoveryFrames) // RecoveryFrames
             {
                 yield return null;
@@ -760,17 +1455,10 @@ public class InputManager : MonoBehaviour
             isAttacking = false;
             totalFrames = 0;
             currentNormal = null;
-        }
-    }
-
-    private IEnumerator FrameCounterCoroutine()
-    {
-        int _totalFrames = 0;
-        while (enabled)
-        {
-            yield return null;
-            _totalFrames++;
-            Debug.Log(_totalFrames);
+            if (activeHitbox != null)
+            {
+                activeHitbox.gameObject.SetActive(false);
+            }
         }
     }
 
@@ -783,13 +1471,12 @@ public class InputManager : MonoBehaviour
     /// </summary>
     private void AttemptUnique()
     {
-        string d = currentDirectionalInput;
         if (!isAttacking)
         {
             for (int i = 0; i < Uniques.Count; i++)
             {
-                string[] correctDirectionalInputs = Uniques[i].DirectionalInput.Split('/');
-                if (ArrayUtility.Contains(correctDirectionalInputs, currentDirectionalInput))
+                List<int> correctDirectionalInputs = ParseDirectionalInput(Uniques[i].DirectionalInputs);
+                if (correctDirectionalInputs.Contains(currentDirectionalInput))
                 {
                     if (Uniques[i].UniqueMoveFunction != null)
                     {
@@ -801,65 +1488,26 @@ public class InputManager : MonoBehaviour
         }
     }
 
-    public bool isDashing;
-    private void SquallDash()
-    {
-        if (!Uniques[2].active)
-        {
-            StartCoroutine(SquallDashCoroutine(Uniques[2]));
-        }
-    }
-
-    private IEnumerator SquallDashCoroutine(UniqueMove unique)
-    {
-        isDashing = true;
-        unique.active = true;
-        StartCoroutine(CheckForFollowUpAttackCoroutine(Uniques[2]));
-        int framesPassed = 0;
-        while (framesPassed < 5)
-        {
-            yield return null;
-            charRB.MovePosition(new Vector2(charRB.position.x + .08f, charRB.position.y));
-            framesPassed++;
-        }
-        while (framesPassed < 20) 
-        {
-            if (unique.followUpActive) // Stops Unique Move if Follow Up is Used
-            {
-                unique.followUpActive = false;
-                yield break;
-            }
-            yield return null;
-            charRB.MovePosition(new Vector2(charRB.position.x + .04f, charRB.position.y));
-            framesPassed++;
-        }
-        unique.active = false;
-        UniqueActivated = false;
-        unique.followUpActive = false;
-        isDashing = false;
-    }
-
     /// <summary>
     /// Checks for a certain input to trigger a follow up attack while the unique move is still active
     /// </summary>
     /// <param name="unique"></param>
     /// <returns></returns>
-    private IEnumerator CheckForFollowUpAttackCoroutine(UniqueMove unique)
+    protected IEnumerator CheckForFollowUpAttackCoroutine(UniqueMove unique)
     {
         while (unique.active)
         {
             for (int i = 0; i < unique.FollowUpAttacks.Count; i++)
             {
                 string[] correctButtonInputs = unique.FollowUpAttacks[i].ButtonInput.Split('/');
-                if (ArrayUtility.Contains(correctButtonInputs, currentButtonInput))
+                /*if (ArrayUtility.Contains(correctButtonInputs, currentButtonInput))
                 {
                     Debug.Log("Rekka");
                     unique.followUpActive = true;
                     unique.active = false;
                     UniqueActivated = false;
-                    isDashing = false;
                     NormalAttackStartUp(unique.FollowUpAttacks[i]);
-                }
+                }*/
             }
             yield return null;
         }
@@ -873,9 +1521,9 @@ public class InputManager : MonoBehaviour
     /// If a check is not already running, check for the motion input.
     /// </summary>
     /// <param name="specialMove"></param>
-    private void TryCheckForMotionInput(SpecialMove specialMove)
+    private void TryCheckForMotionInput(SpecialMove specialMove, int _directionalInput)
     {
-        if (!specialMove.checkRunning)
+        if (!specialMove.checkRunning && ParseDirectionalInput(specialMove.MotionInput[0]).Contains(_directionalInput))
         {
             StartCoroutine(CheckForMotionInputCoroutine(specialMove));
         }
@@ -893,11 +1541,12 @@ public class InputManager : MonoBehaviour
         for (int i = 0; i < specialMove.MotionInput.Length; i++) // Loops through each input in the motion
         {
             // For multiple corect inputs, seperate each input with a '/'
-            string[] correctInputs = specialMove.MotionInput[i].Split('/');
-            CoroutineWithData _coroutineWithData = new CoroutineWithData(this, CompareInputCoroutine("Direction", correctInputs, 6));
+            List<int> correctDirectionalInputs = ParseDirectionalInput(specialMove.MotionInput[i]);
+            CoroutineWithData _coroutineWithData = new CoroutineWithData(this, CompareDirectionalInputCoroutine(correctDirectionalInputs, 6));
             yield return _coroutineWithData.MyCoroutine;
             if (!(bool)_coroutineWithData.result)
             {
+                yield return null;
                 specialMove.checkRunning = false;
                 yield break;
             }
@@ -905,14 +1554,16 @@ public class InputManager : MonoBehaviour
         }
         SpecialMoveActivated = true;
         string[] buttonInputs = specialMove.ButtonInput;
-        CoroutineWithData coroutineWithData = new CoroutineWithData(this, CompareInputCoroutine("Button", buttonInputs, 6));
+        CoroutineWithData coroutineWithData = new CoroutineWithData(this, CompareButtonInputCoroutine(buttonInputs, 9));
         yield return coroutineWithData.MyCoroutine;
         if (!(bool)coroutineWithData.result)
         {
+            yield return null;
             specialMove.checkRunning = false;
             SpecialMoveActivated = false;
             yield break;
         }
+        Debug.Log("Special Activated");
         specialMove.SpecialMoveFunction?.Invoke();
         yield return new WaitForSeconds(.1f);
         specialMove.checkRunning = false;
@@ -926,22 +1577,39 @@ public class InputManager : MonoBehaviour
     /// <param name="_desiredInputs"></param>
     /// <param name="frameCount"></param>
     /// <returns></returns>
-    private IEnumerator CompareInputCoroutine(string inputType, string[] _desiredInputs, int frameCount)
+    private IEnumerator CompareButtonInputCoroutine(string[] _desiredInputs, int frameCount)
     {
         int framesPassed = 0;
-        string currentInput = "";
+        string currentInput;
         while (framesPassed < frameCount)
         {
-            switch (inputType)
+            currentInput = currentButtonInput;
+            /*if (ArrayUtility.Contains(_desiredInputs, currentInput)) // Correct input
             {
-                case "Direction":
-                    currentInput = currentDirectionalInput;
-                    break;
-                case "Button":
-                    currentInput = currentButtonInput;
-                    break;
-            }
-            if (ArrayUtility.Contains(_desiredInputs, currentInput)) // Correct input
+                yield return true;
+                yield break;
+            }*/
+            yield return null;
+            framesPassed++;
+        }
+        yield return false; // No correct input in time
+    }
+
+    /// <summary>
+    /// A coroutine which checks if the player's input matches that of the desired input.
+    /// </summary>
+    /// <param name="inputType"></param>
+    /// <param name="_desiredInput"></param>
+    /// <param name="frameCount"></param>
+    /// <returns></returns>
+    private IEnumerator CompareDirectionalInputCoroutine(List<int> _desiredInput, int frameCount)
+    {
+        int framesPassed = 0;
+        int currentInput;
+        while (framesPassed < frameCount)
+        {
+            currentInput = currentDirectionalInput;
+            if (_desiredInput.Contains(currentInput)) // Correct input
             {
                 yield return true;
                 yield break;
@@ -973,7 +1641,7 @@ public class InputManager : MonoBehaviour
     private void OnDrawGizmos()
     {
         Gizmos.color = new Color(0, 0, 1, .25f);
-        Gizmos.DrawCube(new Vector3(charRB.position.x + 0.1f, charRB.position.y - 0.3f, 0), new Vector2(0.6f, 1.25f));
+        Gizmos.DrawCube(new Vector3(charRB.position.x + 0.1f, charRB.position.y - 0.1f, 0), new Vector2(0.535f, 1.6f));
     }
 
     private void OnEnable()
@@ -984,12 +1652,7 @@ public class InputManager : MonoBehaviour
     private void OnDisable()
     {
         controls.Disable();
-    }
-
-    private void OnDestroy()
-    {
-        Specials[0].SpecialMoveFunction -= DPTest;
-        Specials[1].SpecialMoveFunction -= SpecialMoveTest;
-        Uniques[2].UniqueMoveFunction -= SquallDash;
+        ResetAirOptions();
+        ResetNormalsUsed();
     }
 }

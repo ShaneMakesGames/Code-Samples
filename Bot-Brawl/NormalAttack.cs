@@ -1,12 +1,12 @@
 using UnityEngine;
 using System.Collections.Generic;
+
 [System.Serializable]
 public class NormalAttack
 {
     [Header("Name")]
     public string MoveName; // The move name, used for multi-hitting normals
 
-    // TODO : Replace with numpad notation (Ex. "Forward" == 6)
     [Header("Input")]
     public string DirectionalInput; // The directional input(s) to activate the move
     public string ButtonInput; // The button input to activate the move
@@ -39,7 +39,11 @@ public class NormalAttack
     public float BlockPushBack; // How much the move pushes the opponent back on block
     public float HitPushBack; // How much the move pushes the opponent back on hit
 
+    [Header("Airborne")]
+    public Vector2 airborneMovement;
+
     [Header("Hitbox Position")]
+    public AttackHitbox AttackHitbox;
     public Vector2 HitboxOffset; // The offset to be passed into the hitbox's BoxCollider
     public Vector2 HitboxSize; // The size to be passed into the hitbox's BoxCollider
 
@@ -48,6 +52,12 @@ public class NormalAttack
     //public List<string> ChainableNormalsOnBlock = new List<string>(); // The normals that can be chained into from this move on block 
 
     [Header("Multi-Hitting")]
-    public bool isMultiHitting; // Does the move hit multiple times?
-    public string multiHitNormalName; // The name of the next move in the sequence
+    public MultiHitData multiHitData;
+
+    public delegate void DelegateFunction();
+    public DelegateFunction OnStartUp;
+    public DelegateFunction OnActive;
+    public DelegateFunction OnRecovery;
+    public DelegateFunction OnBlocked;
+    public DelegateFunction OnHit;
 }

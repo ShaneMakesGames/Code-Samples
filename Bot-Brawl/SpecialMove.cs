@@ -6,7 +6,6 @@ public class SpecialMove
     [Header("Name")]
     public string MoveName; // The move name
 
-    // TODO : Replace with numpad notation (Ex. "Quarter Circle Forward" == 236)
     [Header("Input")]
     public string MotionInputName; // The motion input name (Ex. "Quarter Circle Forward")
     public string[] MotionInput; // The directional inputs that make up the motion input
