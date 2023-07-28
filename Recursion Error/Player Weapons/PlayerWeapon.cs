@@ -10,20 +10,20 @@ public struct AttackData
     public int damage;
     [Header("Animation Data")]
     public string attackAnimID;
-    public bool shouldInterrupt;
+    public bool shouldInterrupt; // Should this attack interrupt enemy attacks
     [Header("Frame Data")]
-    public float startupTime;
-    public float activeTime;
-    public float hitstopTime;
-    public float recoveryTime;
-    public float hitstunTime;
+    public float startupTime; // How long until the attack starts after it is inputted 
+    public float activeTime; // How long the attack stays active for, meaning it can deal damage
+    public float hitstopTime; // How long it puts the player and enemy in hitstop (Purely for animation/game-feel purposes)
+    public float recoveryTime; // How long you are in recovery for (cannot take action) after performing the attack 
+    public float hitstunTime; // How long the enemy is in hitstun for, they cannot take action during this time
     [Header("Hitbox Data")]
     public Vector2 offset;
     public Vector2 size;
     public AttackType attackType;
     [Header("Movement")]
-    public float amountToMove;
-    public float pushbackAmount;
+    public float amountToMove; // Amount the player moves forward while attacking
+    public float pushbackAmount; // Amount the enemy is pushed backwards from the attack
     public bool debugShowHitbox;
 
     public bool gauntletDamageBuffActive;
