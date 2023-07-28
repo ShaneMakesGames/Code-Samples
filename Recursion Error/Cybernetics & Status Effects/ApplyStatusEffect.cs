@@ -21,7 +21,7 @@ public class ApplyStatusEffect : Cybernetic
     public void ApplyStatusEffectToEnemy(EnemyDemo enemy)
     {
         if (enemy == null) return;
-        if (enemy.isDead || enemy.imLiterallyJustAWall || enemy.isBoss) return;
+        if (enemy.isDead || enemy.isBoss) return;
 
         if (statusType == StatusType.VOID && enemy.isFrozen) // If enemy is frozen by void stacks, unfreeze them
         {
