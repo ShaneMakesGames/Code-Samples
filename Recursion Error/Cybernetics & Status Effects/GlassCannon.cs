@@ -24,9 +24,8 @@ public class GlassCannon : Cybernetic
 
     public void RemoveThisCybernetic(EnemyDemo enemy = null)
     {
-        // Temp
-        // Mark for deletion
-        BattleManager.singleton.RemoveCybernetic(CyberneticSlot.BODY);
+        BattleManager.singleton.playerController.PlayCyberneticVFX(CyberneticSlot.BODY);
+        BattleManager.singleton.RemoveCybernetic(this);
     }
 
     private void OnDestroy()
