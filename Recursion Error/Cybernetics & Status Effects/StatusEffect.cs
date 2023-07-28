@@ -7,16 +7,16 @@ using UnityEngine.Events;
 public enum StatusType
 {
     BURN,
-    FREEZE,
     LIGHTNING,
-    VOID
+    VOID,
+    COUNT
 }
 
 public enum StatusTriggers
 {
-    TRIGGERS_WHEN_APPLIED, // Triggers when a status is applied
-    TRIGGERED_FROM_TIME, // Trigger after a certain amount of time
-    TRIGGERED_FROM_STACKS, // Triggers after a certain amount of stacks
+    TRIGGERS_WHEN_APPLIED,
+    TRIGGERED_FROM_TIME,
+    TRIGGERED_FROM_STACKS,
     COUNT
 }
 
@@ -31,6 +31,7 @@ public partial class StatusEffect
 
     public int stacksApplied;
     public int stacksToTrigger;
+    public int maxStacks;
 
     public float timeSinceLastTrigger;
     public float totalTimePassed;
@@ -41,9 +42,9 @@ public partial class StatusEffect
     public bool[] triggers;
 
     public delegate void TriggerFunction();
-    public TriggerFunction ApplicationTriggerFunction;
-    public TriggerFunction TimeTriggerFunction;
-    public TriggerFunction StackTriggerFunction;
+    public TriggerFunction ApplicationTriggerFunction; // Triggers when status effect is first applied
+    public TriggerFunction TimeTriggerFunction; // Triggers after a set amount of time
+    public TriggerFunction StackTriggerFunction; // Triggers after a certain amount of stacks are applied
 
     public StackVisual stackVisual;
 
@@ -59,13 +60,24 @@ public partial class StatusEffect
         switch (statusType)
         {
             case StatusType.BURN:
-                triggers[(int)StatusTriggers.TRIGGERED_FROM_STACKS] = true;
                 triggers[(int)StatusTriggers.TRIGGERED_FROM_TIME] = true;
                 TimeTriggerFunction += TakeBurnDamage;
-                StackTriggerFunction += TakeScorchDamage;
                 timeToTrigger = 1;
+                maxStacks = 5;
                 timeToExpire = 5;
-                stacksToTrigger = 5;
+                break;
+            case StatusType.LIGHTNING:
+                triggers[(int)StatusTriggers.TRIGGERS_WHEN_APPLIED] = true;
+                ApplicationTriggerFunction += CreateLightningStrike;
+                maxStacks = 3;
+                timeToExpire = 5;
+                break;
+            case StatusType.VOID:
+                triggers[(int)StatusTriggers.TRIGGERED_FROM_STACKS] = true;
+                StackTriggerFunction += FreezeEnemy;
+                maxStacks = 3;
+                stacksToTrigger = 3;
+                timeToExpire = 2;
                 break;
         }
 
@@ -76,14 +88,16 @@ public partial class StatusEffect
     {
         myEnemy = enemy;
 
+        stacksApplied++;
+        totalTimePassed = 0;
+
+        if (stacksApplied > maxStacks) stacksApplied = maxStacks;
+        stackVisual.SetStackCountText(stacksApplied);
+
         if (triggers[(int)StatusTriggers.TRIGGERS_WHEN_APPLIED])
         {
             if (ApplicationTriggerFunction != null) ApplicationTriggerFunction();
         }
-
-        stacksApplied++;
-        totalTimePassed = 0;
-        stackVisual.SetStackCountText(stacksApplied);
 
         if (stacksApplied >= stacksToTrigger) StacksTriggered();
     }
@@ -132,7 +146,16 @@ public partial class StatusEffect
         {
             case StatusType.BURN:
                 TimeTriggerFunction -= TakeBurnDamage;
-                StackTriggerFunction -= TakeScorchDamage;
+                break;
+            case StatusType.LIGHTNING:
+                ApplicationTriggerFunction -= CreateLightningStrike;
+                break;
+            case StatusType.VOID:
+                myEnemy.isFrozen = false;
+                myEnemy.agent.isStopped = false;
+                myEnemy.animator.enabled = true;
+                myEnemy.ResetCurrentAttack();
+                StackTriggerFunction -= FreezeEnemy;
                 break;
         }
 
