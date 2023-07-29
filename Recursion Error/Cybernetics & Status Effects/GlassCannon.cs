@@ -5,6 +5,8 @@ using UnityEngine;
 [CreateAssetMenu(fileName = "Glass Cannon", menuName = "CyberneticSO/GlassCannon")]
 public class GlassCannon : Cybernetic
 {
+    // This cybernetic increases the player's damage but breaks once the player takes damage  
+
     public float damageMultiplier;
 
     public override void AssignTriggers()
