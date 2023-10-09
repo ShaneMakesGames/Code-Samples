@@ -1,6 +1,9 @@
 # **Script Descriptions**
 Scripts from my Senior Project, Recursion Error :
 
+## [**Dialogue Manager**](https://github.com/ShaneMakesGames/Code-Samples/blob/main/Recursion%20Error/DialogueManager.cs)
+- This script loads all the dialogue (Exported data from a spreadsheet as a .tsv is converted to a .txt, and then parsed by Dialogue Manager) and then stores it into dictionaries to be pulled from later
+   
 ## [**Player Weapons**](https://github.com/ShaneMakesGames/Code-Samples/tree/main/Recursion%20Error/Player%20Weapons)
 - These scripts control the player weapons' base attack functionality, as well as their unique mechanics.
 
