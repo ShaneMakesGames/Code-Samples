@@ -329,10 +329,10 @@ public class ResultsUI : MonoBehaviour, IMenuScreen
 
         if (isMenuAnimating)
         {
-            SFXSystem.singleton.PlaySFX("UI_Cancel");
+            SkipAnimationCompletely();
+            SFXSystem.singleton.PlaySFX("UI_Confirm");
             return;
         }
-
 
         SFXSystem.singleton.PlaySFX("UI_Confirm");
         InputHandler.SetGameState(GameState.BATTLE, playFadeAnimation: true);
@@ -344,6 +344,7 @@ public class ResultsUI : MonoBehaviour, IMenuScreen
 
         if (isMenuAnimating)
         {
+            SkipAnimationCompletely();
             SFXSystem.singleton.PlaySFX("UI_Cancel");
             return;
         }
@@ -367,6 +368,35 @@ public class ResultsUI : MonoBehaviour, IMenuScreen
             confirmIcon.sprite = playstationConfirmSprite;
             cancelIcon.sprite = playstationCancelSprite;
         }
+    }
+
+    public void SkipAnimationCompletely()
+    {
+        StopAllCoroutines();
+
+        int score = GameManager.singleton.score;
+        Sprite rankSprite = GetRankIconFromScore(score);
+        rankImage.sprite = rankSprite;
+        rankName = rankSprite.name.ToUpperInvariant();
+
+        scoreText.text = score.ToString("n0");
+        waveText.text = GameManager.GetBattleStat(GameManager.WAVE_COUNT_STRING).ToString();
+        comboText.text = GameManager.GetBattleStat(GameManager.HIGHEST_COMBO_STRING).ToString();
+        killText.text = GameManager.GetBattleStat(GameManager.KILLS_STRING).ToString();
+        parryText.text = GameManager.GetBattleStat(GameManager.PARRIES_STRING).ToString();
+
+
+        float scorePercent = Mathf.Clamp((float)GameManager.singleton.score / RUBY_CUTOFF_AMOUNT, 0f, 1f);
+        float targetPos = PROGRESS_FILL_STARTING_POSITION + (MAX_PROGRESS_FILL_AMOUNT * scorePercent);
+        progressFill.transform.localPosition = new Vector3(targetPos, 0, 0);
+        CheckForProgressIconAnimation(targetPos);
+
+        LeanTween.moveLocalX(leftScrollImage.gameObject, LEFT_SCROLL_END_POSITION, 0);
+        LeanTween.moveLocalX(rightScrollImage.gameObject, RIGHT_SCROLL_END_POSITION, 0);
+        animatedScrollBGImage.rectTransform.localScale = Vector3.one;
+        fullScrollImage.gameObject.SetActive(true);
+        rankText.text = rankName;
+        isMenuAnimating = false;
     }
 
     public void OpenMenuScreen()
