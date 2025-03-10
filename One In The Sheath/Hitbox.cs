@@ -49,7 +49,7 @@ public class Hitbox : MonoBehaviour
     private void Update()
     {
         if (!isActive) return;
-        if (GameManager.InHitstop || PauseUI.isGamePaused) return;
+        if (!GameManager.singleton.battleActive || GameManager.InHitstop || PauseUI.isGamePaused) return;
 
         timeSinceBecomeActive += Time.deltaTime;
         if (timeSinceBecomeActive > activeTimeToCheck)
